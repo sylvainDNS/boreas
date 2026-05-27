@@ -1,0 +1,33 @@
+{
+  "name": "boreas-cron",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "queues": {
+    // Le Cron est à la fois producteur (scheduled → enqueue les feeds dus)
+    // et consommateur (queue → ingère chaque feed) de boreas-ingestion. (ADR 0002)
+    "producers": [
+      {
+        "queue": "boreas-ingestion",
+        "binding": "INGESTION_QUEUE"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "boreas-ingestion",
+        "max_batch_size": 10,
+        "max_retries": 3
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "boreas",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

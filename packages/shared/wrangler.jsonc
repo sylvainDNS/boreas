@@ -1,0 +1,14 @@
+{
+  // Config utilisée UNIQUEMENT pour appliquer les migrations D1 (pas de Worker).
+  // wrangler d1 migrations apply DB --local --persist-to .wrangler/state --config packages/shared/wrangler.jsonc
+  "name": "boreas-shared",
+  "compatibility_date": "2026-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "boreas",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

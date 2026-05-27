@@ -1,0 +1,10 @@
+{
+  "item": {
+    "guid": null,
+    "link": null,
+    "title": "Article sans identifiant",
+    "content": "<p>Ni guid ni lien dans ce flux défectueux.</p>"
+  },
+  "feedId": "feed-abc",
+  "expectedPrefix": "hash:"
+}

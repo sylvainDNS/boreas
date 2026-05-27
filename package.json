@@ -1,0 +1,26 @@
+{
+  "private": true,
+  "name": "boreas",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.4.0",
+  "scripts": {
+    "dev:api": "wrangler dev --config apps/api/wrangler.jsonc --persist-to .wrangler/state",
+    "dev:cron": "wrangler dev --config apps/cron/wrangler.jsonc --persist-to .wrangler/state",
+    "dev:web": "pnpm --filter @boreas/web dev",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply DB --local --persist-to .wrangler/state --config packages/shared/wrangler.jsonc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r --if-present build"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.95.0"
+  }
+}

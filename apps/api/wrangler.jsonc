@@ -1,0 +1,22 @@
+{
+  "name": "boreas-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "boreas",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "queues": {
+    // Producer déclaré maintenant — utilisé au #10 (Refresh manuel / ingestion API).
+    "producers": [
+      {
+        "queue": "boreas-ingestion",
+        "binding": "INGESTION_QUEUE"
+      }
+    ]
+  }
+}

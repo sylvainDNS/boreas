@@ -10,13 +10,4 @@
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
-  "queues": {
-    // Producer déclaré maintenant — utilisé au #10 (Refresh manuel / ingestion API).
-    "producers": [
-      {
-        "queue": "boreas-ingestion",
-        "binding": "INGESTION_QUEUE"
-      }
-    ]
-  }
 }

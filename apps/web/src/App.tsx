@@ -1,16 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 
-interface HealthResponse {
-  status: string;
-  refreshIntervalMin: number;
-  purgeWindowDays: number;
-  theme: string;
-}
+const healthSchema = z.object({
+  status: z.string(),
+  refreshIntervalMin: z.number(),
+  purgeWindowDays: z.number(),
+  theme: z.string(),
+});
+
+type HealthResponse = z.infer<typeof healthSchema>;
 
 async function fetchHealth(): Promise<HealthResponse> {
   const res = await fetch("/api/health");
   if (!res.ok) throw new Error(`/api/health a répondu ${res.status}`);
-  return res.json() as Promise<HealthResponse>;
+  return healthSchema.parse(await res.json());
 }
 
 export default function App() {

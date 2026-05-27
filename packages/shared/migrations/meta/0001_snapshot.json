@@ -1,8 +1,8 @@
 {
+  "id": "24c52a06-7873-406a-968a-0b6fd93e4b3e",
+  "prevId": "80b48195-e3b3-480a-8aef-a9a06fc8d19d",
   "version": "6",
   "dialect": "sqlite",
-  "id": "80b48195-e3b3-480a-8aef-a9a06fc8d19d",
-  "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "settings": {
       "name": "settings",
@@ -73,9 +73,9 @@
   "views": {},
   "enums": {},
   "_meta": {
+    "columns": {},
     "schemas": {},
-    "tables": {},
-    "columns": {}
+    "tables": {}
   },
   "internal": {
     "indexes": {}

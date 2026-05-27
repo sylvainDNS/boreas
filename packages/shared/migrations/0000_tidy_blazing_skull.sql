@@ -5,5 +5,6 @@ CREATE TABLE `settings` (
 	`purge_window_days` integer DEFAULT 60 NOT NULL,
 	`theme` text DEFAULT 'system' NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) NOT NULL,
-	CONSTRAINT "settings_single_row" CHECK("settings"."id" = 1)
+	CONSTRAINT "settings_single_row" CHECK("settings"."id" = 1),
+	CONSTRAINT "settings_theme_valid" CHECK("settings"."theme" in ('light', 'dark', 'system'))
 );

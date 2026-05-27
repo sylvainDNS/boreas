@@ -3,8 +3,6 @@ import { getDb, settings } from "@boreas/shared";
 
 interface Env {
   DB: D1Database;
-  /** Queue d'ingestion — producer binding (utilisé au #10). */
-  INGESTION_QUEUE: Queue;
 }
 
 const app = new Hono<{ Bindings: Env }>();

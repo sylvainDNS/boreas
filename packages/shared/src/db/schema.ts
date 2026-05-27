@@ -3,7 +3,8 @@ import { sql } from "drizzle-orm";
 
 /**
  * Ligne unique de configuration globale (singleton, id toujours 1).
- * Contrainte CHECK définie dans la migration SQL (0000_init.sql).
+ * Les contraintes CHECK (singleton id = 1, thème valide) sont générées par drizzle
+ * depuis les appels `check()` ci-dessous et matérialisées dans la migration DDL.
  */
 export const settings = sqliteTable(
   "settings",
@@ -26,6 +27,11 @@ export const settings = sqliteTable(
   (table) => [
     // Garantit que la table ne contient jamais plus d'une ligne.
     check("settings_single_row", sql`${table.id} = 1`),
+    // Borne les valeurs de thème au niveau base (redondant avec l'enum TS, mais défensif).
+    check(
+      "settings_theme_valid",
+      sql`${table.theme} in ('light', 'dark', 'system')`,
+    ),
   ],
 );
 

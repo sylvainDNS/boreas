@@ -1,6 +1,6 @@
 # Topologie : Pages + deux Workers
 
-Le déploiement sépare trois unités : **Pages** sert le SPA statique (React + Vite), un **Worker API** sert l'API JSON (auth magic link, lecture, extraction du contenu à l'ouverture) et un **Worker Cron** assure l'ingestion planifiée et la maintenance (fetch des flux, déduplication, upsert, purge). Tous deux partagent les bindings D1 et R2. Le code commun (schéma + accès D1, types, parser de flux, logique de dédup) vit dans un **package partagé** d'un monorepo, consommé par les deux Workers — jamais dupliqué.
+Le déploiement sépare trois unités : **Pages** sert le SPA statique (React + Vite), un **Worker API** sert l'API JSON (auth magic link, lecture, proxy d'images) et un **Worker Cron** (Cron Trigger + **consommateur de Queue**, ADR 0002) assure l'ingestion et la maintenance (fetch, extraction, déduplication, upsert, purge). Tous deux partagent les bindings D1 et R2. Le code commun (schéma + accès D1, types, parser de flux, logique de dédup) vit dans un **package partagé** d'un monorepo, consommé par les deux Workers — jamais dupliqué.
 
 ## Considered Options
 

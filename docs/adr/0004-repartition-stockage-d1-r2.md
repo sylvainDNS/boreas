@@ -1,6 +1,6 @@
 # Répartition du stockage D1 / R2
 
-Le HTML plein extrait est volumineux ; on veut garder le store relationnel léger. **D1** héberge les métadonnées de l'Article (identité, titre, auteur, date, URL, **résumé fourni par le flux**, états `Read`/`Saved`, clé de l'objet R2). **R2** héberge le **HTML plein extrait** (écrit à la première ouverture, objet keyé `articles/{id}.html`). **KV n'est pas utilisé.**
+Le HTML plein extrait est volumineux ; on veut garder le store relationnel léger. **D1** héberge les métadonnées de l'Article (identité, titre, auteur, date, URL, **résumé fourni par le flux**, états `Read`/`Saved`, clé de l'objet R2). **R2** héberge le **HTML plein extrait** (écrit à l'ingestion, ADR 0003, objet keyé `articles/{id}.html`). **KV n'est pas utilisé.**
 
 ## Considered Options
 

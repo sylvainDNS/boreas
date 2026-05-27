@@ -23,6 +23,9 @@ wrangler.toml.bak
 npm-debug.log*
 yarn-error.log*
 
+# Local agent / editor settings
+.claude/settings.local.json
+
 # OS / editor
 .DS_Store
 .idea/

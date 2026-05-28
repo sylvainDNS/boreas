@@ -6,9 +6,9 @@ import App from "./App";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Rafraîchissement au focus pour refléter l'état serveur (US #39 du PRD).
+      // staleTime: 0 (défaut) garantit que refetchOnWindowFocus:true déclenche
+      // toujours un refetch, conformément à l'US #39 du PRD.
       refetchOnWindowFocus: true,
-      staleTime: 30_000,
     },
   },
 });

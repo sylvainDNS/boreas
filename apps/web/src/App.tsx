@@ -5,7 +5,7 @@ const healthSchema = z.object({
   status: z.string(),
   refreshIntervalMin: z.number(),
   purgeWindowDays: z.number(),
-  theme: z.string(),
+  theme: z.enum(["light", "dark", "system"]),
 });
 
 type HealthResponse = z.infer<typeof healthSchema>;

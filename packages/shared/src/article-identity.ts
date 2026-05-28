@@ -34,7 +34,7 @@ export function articleKey(item: ArticleItem, feedId: string): string {
   if (link) {
     return `link:${link}`;
   }
-  const stable = `${feedId}\0${item.title ?? ""}\0${item.content ?? ""}`;
+  const stable = JSON.stringify([feedId, item.title ?? "", item.content ?? ""]);
   const digest = createHash("sha256").update(stable).digest("hex").slice(0, 32);
   return `hash:${digest}`;
 }

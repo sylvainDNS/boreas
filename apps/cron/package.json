@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --config wrangler.jsonc --persist-to ../../.wrangler/state",
+    "dev": "wrangler dev --config wrangler.jsonc --persist-to ../../.wrangler/state --port 8788 --inspector-port 0 --test-scheduled",
     "typecheck": "tsc --noEmit",
     "build": "wrangler deploy --dry-run --config wrangler.jsonc"
   },

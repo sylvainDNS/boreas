@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { articleKey, type ArticleItem } from "../src/article-identity";
+import { type ArticleItem, articleKey } from "../src/article-identity";
 import { loadFixture } from "./helpers/load-fixture";
 
 interface Fixture {
@@ -47,7 +47,10 @@ describe("articleKey", () => {
   });
 
   it("le hash est stable (mêmes entrées → même clé)", () => {
-    const item: ArticleItem = { title: "Mon Article", content: "<p>Bonjour</p>" };
+    const item: ArticleItem = {
+      title: "Mon Article",
+      content: "<p>Bonjour</p>",
+    };
     expect(articleKey(item, "feed-1")).toBe(articleKey(item, "feed-1"));
   });
 

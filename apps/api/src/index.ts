@@ -1,5 +1,5 @@
-import { Hono } from "hono";
 import { getDb, settings } from "@boreas/shared";
+import { Hono } from "hono";
 
 interface Env {
   DB: D1Database;
@@ -30,7 +30,10 @@ app.get("/api/health", async (c) => {
     });
   } catch (err) {
     return c.json(
-      { status: "error", detail: err instanceof Error ? err.message : "unknown" },
+      {
+        status: "error",
+        detail: err instanceof Error ? err.message : "unknown",
+      },
       500,
     );
   }

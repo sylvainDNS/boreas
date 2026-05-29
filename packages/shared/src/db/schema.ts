@@ -1,5 +1,5 @@
-import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
  * Ligne unique de configuration globale (singleton, id toujours 1).

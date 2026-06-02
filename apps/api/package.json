@@ -1,0 +1,20 @@
+{
+  "name": "@boreas/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.jsonc --persist-to ../../.wrangler/state",
+    "typecheck": "tsc --noEmit",
+    "build": "wrangler deploy --dry-run --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "@boreas/shared": "workspace:*",
+    "hono": "^4.12.23"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260527.1",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.95.0"
+  }
+}

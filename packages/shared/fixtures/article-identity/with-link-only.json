@@ -1,0 +1,10 @@
+{
+  "item": {
+    "guid": null,
+    "link": "https://example.com/articles/no-guid",
+    "title": "Article sans GUID",
+    "content": "<p>Pas de guid dans ce flux.</p>"
+  },
+  "feedId": "feed-abc",
+  "expectedPrefix": "link:"
+}

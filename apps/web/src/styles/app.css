@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* Le thème est piloté par l'attribut `data-theme` sur <html> (cf. src/lib/theme.ts),
+   pas par la classe `.dark` ni par la media-query : il faut pouvoir forcer clair/sombre. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ------------------------------------------------------------------ Tokens
+   Direction « Moderne carte » (D3) retenue en revue #4 :
+   Figtree, accent violet, cartes arrondies + ombres douces, cibles larges.
+   Valeurs par défaut = thème clair ; le thème sombre surcharge les variables
+   couleur sous [data-theme="dark"] plus bas. */
+@theme {
+  --color-bg: oklch(0.97 0.012 300);
+  --color-surface: oklch(1 0 0);
+  --color-surface-2: oklch(0.96 0.02 300);
+  --color-border: oklch(0.92 0.012 300);
+  --color-text: oklch(0.25 0.02 300);
+  --color-muted: oklch(0.55 0.02 300);
+  --color-accent: oklch(0.58 0.19 300);
+  --color-accent-hover: oklch(0.53 0.19 300);
+  --color-accent-fg: oklch(0.99 0 0);
+
+  --font-ui: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-read: "Figtree", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 16px;
+
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 0.05), 0 6px 20px oklch(0 0 0 / 0.07);
+  --shadow-pop: 0 8px 30px oklch(0 0 0 / 0.12);
+}
+
+[data-theme="dark"] {
+  --color-bg: oklch(0.19 0.015 300);
+  --color-surface: oklch(0.24 0.018 300);
+  --color-surface-2: oklch(0.29 0.022 300);
+  --color-border: oklch(0.31 0.02 300);
+  --color-text: oklch(0.93 0.01 300);
+  --color-muted: oklch(0.65 0.018 300);
+  --color-accent: oklch(0.74 0.17 300);
+  --color-accent-hover: oklch(0.79 0.17 300);
+  --color-accent-fg: oklch(0.16 0.02 300);
+
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 0.4), 0 6px 20px oklch(0 0 0 / 0.45);
+  --shadow-pop: 0 8px 30px oklch(0 0 0 / 0.6);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-ui);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Évite un flash clair avant l'hydratation du thème. */
+  html {
+    color-scheme: light dark;
+  }
+}
+
+/* Typographie de lecture du contenu d'article (panneau lecteur).
+   Réutilisée par la tranche #7 (contenu extrait). */
+.reader-prose {
+  font-family: var(--font-read);
+  line-height: 1.7;
+  font-size: 1.05rem;
+}
+.reader-prose > * + * {
+  margin-top: 1.1em;
+}

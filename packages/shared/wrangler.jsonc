@@ -7,7 +7,7 @@
     {
       "binding": "DB",
       "database_name": "boreas",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "d3879d06-37b7-4d48-ac02-cc8a4f7718f8",
       "migrations_dir": "migrations"
     }
   ]

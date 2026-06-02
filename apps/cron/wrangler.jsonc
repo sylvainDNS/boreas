@@ -27,7 +27,15 @@
     {
       "binding": "DB",
       "database_name": "boreas",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "d3879d06-37b7-4d48-ac02-cc8a4f7718f8"
+    }
+  ],
+  // R2 : le Cron écrit le HTML plein extrait à l'ingestion (articles/{id}.html). (ADR 0004/0009)
+  // Bindé dès maintenant ; consommé à partir de #7/#9.
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "boreas"
     }
   ]
 }

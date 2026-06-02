@@ -1,0 +1,16 @@
+{
+  // Projet Cloudflare Pages servant le SPA statique + une Function proxy /api/*.
+  // Déploiement : wrangler pages deploy --config apps/web/wrangler.jsonc
+  "name": "boreas",
+  "pages_build_output_dir": "dist",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Service binding vers le Worker API : env.API.fetch() sans hop réseau (ADR 0008).
+  // boreas-api doit être déployé avant Pages.
+  "services": [
+    {
+      "binding": "API",
+      "service": "boreas-api"
+    }
+  ]
+}

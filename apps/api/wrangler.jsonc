@@ -7,7 +7,23 @@
     {
       "binding": "DB",
       "database_name": "boreas",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "d3879d06-37b7-4d48-ac02-cc8a4f7718f8"
+    }
+  ],
+  // R2 : HTML plein extrait (articles/{id}.html) + images proxifiées (images/{hash}). (ADR 0004/0009)
+  // Bindé dès maintenant ; consommé à partir de #7/#9.
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "boreas"
+    }
+  ],
+  // Envoi du magic link via Cloudflare Email Service vers l'adresse vérifiée. (ADR 0005)
+  // Le destinataire doit être vérifié dans Email Routing avant tout déploiement.
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "destination_address": "boreas.overcrowd752@passmail.net"
     }
   ]
 }

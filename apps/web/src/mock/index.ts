@@ -48,11 +48,6 @@ export const folders: MockFolder[] = [
   },
 ];
 
-export const totalUnread = folders.reduce(
-  (sum, f) => sum + f.feeds.reduce((s, feed) => s + feed.unread, 0),
-  0,
-);
-
 export const articles: MockArticle[] = [
   {
     id: "a1",

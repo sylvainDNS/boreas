@@ -5,10 +5,11 @@ import {
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 import {
+  ARTICLES_COUNTS_KEY,
   type Article,
   type ArticleDetail,
   articleDetailQueryOptions,
-  markArticleReadInListCache,
+  setArticleReadInListCaches,
 } from "../lib/articles";
 import { EmptyState } from "./EmptyState";
 import { buttonClasses } from "./ui/Button";
@@ -24,10 +25,15 @@ export function ReaderPane({ article }: { article: Article }) {
   const detail = useQuery(articleDetailQueryOptions(article.id));
 
   useEffect(() => {
-    if (detail.isSuccess) {
-      markArticleReadInListCache(queryClient, article.id);
+    // N'aligne le cache que si l'article était non-lu : le GET du détail vient
+    // de le marquer Read côté serveur (#7). Rouvrir un article déjà lu n'a rien
+    // changé en base — inutile de repatcher les listes ni d'invalider les
+    // compteurs (#8).
+    if (detail.isSuccess && article.unread) {
+      setArticleReadInListCaches(queryClient, article.id, true);
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
     }
-  }, [detail.isSuccess, article.id, queryClient]);
+  }, [detail.isSuccess, article.id, article.unread, queryClient]);
 
   // Préfère le lien du détail, mais retombe sur celui de la liste : « Original »
   // reste accessible même si le chargement du contenu échoue.

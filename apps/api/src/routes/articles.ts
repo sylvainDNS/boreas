@@ -1,6 +1,7 @@
 import { articles, feeds, getDb } from "@boreas/shared";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Env } from "../env";
 
 /** Taille de page de la liste « Tous les non-lus ». */
@@ -13,16 +14,16 @@ const PAGE_SIZE = 30;
 export const articlesRoutes = new Hono<{ Bindings: Env }>();
 
 /**
- * Liste paginée des articles non-lus, du plus récent au plus ancien.
+ * Liste paginée des articles, du plus récent au plus ancien.
  *
- * Pagination **keyset** sur `(fetched_at desc, id desc)` : le curseur encode le
- * dernier `(fetched_at, id)` servi, évitant les sauts/doublons d'une pagination
- * par offset quand de nouveaux articles arrivent.
+ * `filter=unread` (défaut) ne sert que les non-lus ; `filter=all` sert lus +
+ * non-lus (#8, US 20). Pagination **keyset** sur `(fetched_at desc, id desc)` :
+ * le curseur encode le dernier `(fetched_at, id)` servi, évitant les
+ * sauts/doublons d'une pagination par offset quand de nouveaux articles arrivent.
  */
 articlesRoutes.get("/", async (c) => {
   const filter = c.req.query("filter") ?? "unread";
-  // #6 ne sert que les non-lus ; les autres filtres arrivent en #8/#9.
-  if (filter !== "unread") {
+  if (filter !== "unread" && filter !== "all") {
     return c.json({ error: "unsupported_filter" }, 400);
   }
 
@@ -36,6 +37,8 @@ articlesRoutes.get("/", async (c) => {
         ),
       )
     : undefined;
+  // `filter=all` lève le prédicat read pour servir aussi les lus.
+  const unreadOnly = filter === "unread" ? eq(articles.read, false) : undefined;
 
   const db = getDb(c.env.DB);
   const rows = await db
@@ -53,7 +56,7 @@ articlesRoutes.get("/", async (c) => {
     })
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(eq(articles.read, false), keyset))
+    .where(and(unreadOnly, keyset))
     .orderBy(desc(articles.fetched_at), desc(articles.id))
     .limit(PAGE_SIZE + 1);
 
@@ -78,6 +81,81 @@ articlesRoutes.get("/", async (c) => {
     })),
     nextCursor,
   });
+});
+
+/**
+ * Compteurs de non-lus exacts : total global + agrégat par Feed (#8). Le SPA y
+ * lit le badge « Tous les non-lus » de la sidebar (exact, indépendamment des
+ * pages chargées). Les feeds sans non-lu n'apparaissent pas dans `byFeed`.
+ *
+ * Déclaré **avant** `GET /:id` pour que `/counts` ne soit pas capturé comme un id.
+ */
+articlesRoutes.get("/counts", async (c) => {
+  const db = getDb(c.env.DB);
+  const rows = await db
+    .select({ feedId: articles.feed_id, count: count() })
+    .from(articles)
+    .where(eq(articles.read, false))
+    .groupBy(articles.feed_id);
+
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  return c.json({ total, byFeed: rows });
+});
+
+const patchSchema = z.object({ read: z.boolean() });
+
+/**
+ * Bascule manuelle Read↔non-lu d'un Article (#8), indépendamment de l'ouverture.
+ */
+articlesRoutes.patch("/:id", async (c) => {
+  const parsed = patchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+
+  const updated = await db
+    .update(articles)
+    .set({ read: parsed.data.read })
+    .where(eq(articles.id, id))
+    .returning({ id: articles.id });
+
+  if (updated.length === 0) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  return c.json({ id, read: parsed.data.read });
+});
+
+const markReadSchema = z.discriminatedUnion("scope", [
+  z.object({ scope: z.literal("global") }),
+  z.object({ scope: z.literal("feed"), feedId: z.string().min(1) }),
+]);
+
+/**
+ * « Tout marquer lu » (#8) au niveau global ou d'un Feed. La portée Folder est
+ * différée à #13 (pas de table folders). On ne touche que les non-lus pour que
+ * `updated` reflète le nombre réel d'articles basculés.
+ */
+articlesRoutes.post("/mark-read", async (c) => {
+  const parsed = markReadSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const db = getDb(c.env.DB);
+
+  const scopeFilter =
+    parsed.data.scope === "feed"
+      ? eq(articles.feed_id, parsed.data.feedId)
+      : undefined;
+
+  const updated = await db
+    .update(articles)
+    .set({ read: true })
+    .where(and(eq(articles.read, false), scopeFilter))
+    .returning({ id: articles.id });
+
+  return c.json({ updated: updated.length });
 });
 
 /**

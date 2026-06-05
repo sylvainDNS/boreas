@@ -11,6 +11,8 @@ interface ArticleListViewProps {
   articles: Article[];
   /** Texte de l'état vide quand la liste est vide. */
   emptyLabel?: string;
+  /** Nombre de non-lus exact (compteur API #8) ; à défaut, dérivé de la liste. */
+  unreadCount?: number;
   /** Chargement initial (première page). */
   isLoading?: boolean;
   /** Erreur de chargement. */
@@ -21,6 +23,14 @@ interface ArticleListViewProps {
   isFetchingNextPage?: boolean;
   /** Demande la page suivante (scroll infini). */
   onEndReached?: () => void;
+  /** Les lus sont-ils affichés ? (interrupteur #8, US 20). */
+  showRead?: boolean;
+  /** Bascule afficher/masquer les lus. */
+  onToggleShowRead?: () => void;
+  /** Bascule Read↔non-lu d'un article (#8). `read` = nouvel état souhaité. */
+  onToggleRead?: (id: string, read: boolean) => void;
+  /** « Tout marquer comme lu » sur la portée de la vue (#8). */
+  onMarkAllRead?: () => void;
 }
 
 /** Vue générique « liste + lecteur » des tranches de lecture (#6, #8, #9, #13…).
@@ -30,11 +40,16 @@ export function ArticleListView({
   title,
   articles,
   emptyLabel = "Aucun article à afficher.",
+  unreadCount,
   isLoading = false,
   isError = false,
   hasNextPage = false,
   isFetchingNextPage = false,
   onEndReached,
+  showRead,
+  onToggleShowRead,
+  onToggleRead,
+  onMarkAllRead,
 }: ArticleListViewProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   // Cherche la sélection DANS la liste courante : si l'article sélectionné
@@ -42,7 +57,9 @@ export function ArticleListView({
   // composant, ex. feed → feed), `selected` devient undefined et le lecteur
   // retombe sur son état vide — au lieu d'afficher un article hors-liste.
   const selected = articles.find((a) => a.id === selectedId);
-  const unreadCount = articles.filter((a) => a.unread).length;
+  // Compteur exact fourni par l'API (#8) ; sinon retombe sur le décompte local
+  // (vues encore sur données mock jusqu'à #13).
+  const unread = unreadCount ?? articles.filter((a) => a.unread).length;
   const hasSelection = Boolean(selected);
 
   // Sentinelle de scroll infini : observe un élément en bas de liste et déclenche
@@ -70,10 +87,28 @@ export function ArticleListView({
       >
         <div className="flex h-14 shrink-0 items-center gap-3 border-border border-b px-4">
           <h2 className="font-semibold">{title}</h2>
-          <CountBadge count={unreadCount} />
-          <div className="ml-auto flex items-center">
+          <CountBadge count={unread} />
+          <div className="ml-auto flex items-center gap-1">
+            {onToggleShowRead && (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showRead ?? false}
+                onClick={onToggleShowRead}
+                className="rounded-card px-2 py-1 text-muted text-xs transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                {showRead ? "Masquer les lus" : "Afficher les lus"}
+              </button>
+            )}
             <IconButton label="Rafraîchir">↻</IconButton>
-            <IconButton label="Tout marquer comme lu">✓</IconButton>
+            <IconButton
+              label="Tout marquer comme lu"
+              onClick={onMarkAllRead}
+              disabled={!onMarkAllRead || unread === 0}
+              className="disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ✓
+            </IconButton>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -93,6 +128,11 @@ export function ArticleListView({
                   article={article}
                   selected={article.id === selectedId}
                   onSelect={() => setSelectedId(article.id)}
+                  onToggleRead={
+                    onToggleRead
+                      ? (read) => onToggleRead(article.id, read)
+                      : undefined
+                  }
                 />
               ))}
               {/* Sentinelle + indicateur de chargement de page suivante. */}

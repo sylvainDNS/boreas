@@ -1,7 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { articleCountsQueryOptions } from "../lib/articles";
 import { AUTH_QUERY_KEY, logout } from "../lib/auth";
-import { folders, totalUnread } from "../mock";
+import { folders } from "../mock";
 import { ThemeToggle } from "./ThemeToggle";
 import { CountBadge } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
@@ -14,6 +15,9 @@ const itemActive = "bg-surface-2 font-medium text-accent";
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // Compteur global de non-lus exact (#8). Les compteurs par feed restent sur
+  // mock tant que la liste réelle des feeds n'existe pas (#13).
+  const counts = useQuery(articleCountsQueryOptions());
 
   async function handleLogout() {
     await logout();
@@ -39,7 +43,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         >
           <span aria-hidden>📥</span>
           <span>Tous les non-lus</span>
-          <CountBadge count={totalUnread} className="ml-auto" />
+          <CountBadge count={counts.data?.total ?? 0} className="ml-auto" />
         </Link>
         <Link
           to="/saved"

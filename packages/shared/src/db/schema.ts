@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { check, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 /**
  * Ligne unique de configuration globale (singleton, id toujours 1).
@@ -51,4 +58,69 @@ export const authTokens = sqliteTable("auth_tokens", {
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
 });
 
-// Tables à venir (feeds, articles, folders) — ajoutées au fil des issues.
+/**
+ * Feed : source distante RSS/Atom identifiée par son URL de flux directe
+ * (CONTEXT.md). Un abonnement = une ligne ; l'unicité de `url` refuse les
+ * doublons d'abonnement. Les colonnes de polling (etag, last_modified,
+ * next_check_at) et `folder_id` seront ajoutées par #10/#13 (expand-only,
+ * ADR 0011).
+ */
+export const feeds = sqliteTable("feeds", {
+  /** UUID applicatif (crypto.randomUUID), stable et indépendant de l'ordre d'insertion. */
+  id: text("id").primaryKey(),
+  /** URL du flux directe ; unique pour dédupliquer les abonnements. */
+  url: text("url").notNull().unique(),
+  /** Titre du flux tel que fourni par la source (nullable). */
+  title: text("title"),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+});
+
+/**
+ * Article : unité de contenu d'un Feed (CONTEXT.md). L'identité est la clé
+ * `(feed_id, article_key)` calculée par `articleKey()` (ADR 0001) ;
+ * l'index unique correspondant garantit la déduplication par flux.
+ *
+ * En #6 on ne stocke que les métadonnées + un résumé texte fourni par le flux :
+ * le contenu plein extrait (R2, sanitization) arrive en #7. L'état `saved`
+ * et le toggle de `read` arrivent en #9/#8 ; seul le défaut `read=false`
+ * (backfill en non-lu) sert ici.
+ */
+export const articles = sqliteTable(
+  "articles",
+  {
+    /** UUID applicatif. */
+    id: text("id").primaryKey(),
+    feed_id: text("feed_id")
+      .notNull()
+      .references(() => feeds.id),
+    /** Clé de déduplication stable (ADR 0001) : guid → link → hash. */
+    article_key: text("article_key").notNull(),
+    title: text("title"),
+    link: text("link"),
+    /** Résumé texte (balises retirées). Le contenu plein R2 arrive en #7. */
+    summary: text("summary"),
+    /** Date de publication ISO 8601 UTC, ou null si absente/illisible. */
+    published_at: text("published_at"),
+    /** Enclosures (média joints) sérialisées en JSON, ou null. */
+    enclosures: text("enclosures"),
+    /** État Read (#8) ; les articles sont backfillés en non-lu. */
+    read: integer("read", { mode: "boolean" }).notNull().default(false),
+    /** Horodatage d'ingestion ISO UTC — clé de tri de la pagination keyset. */
+    fetched_at: text("fetched_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+    created_at: text("created_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  },
+  (table) => [
+    // Déduplication par flux (ADR 0001) : même clé dans le même feed = même Article.
+    uniqueIndex("articles_feed_key").on(table.feed_id, table.article_key),
+    // Pagination keyset de « Tous les non-lus » : (read, fetched_at desc, id).
+    index("articles_unread_keyset").on(table.read, table.fetched_at, table.id),
+  ],
+);
+
+// Tables à venir (folders) — ajoutées au fil des issues.

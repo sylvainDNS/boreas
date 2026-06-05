@@ -69,4 +69,20 @@ describe("articleKey", () => {
     const key = articleKey({ guid: null, link: "", title: "T" }, "f1");
     expect(key).toMatch(/^hash:[0-9a-f]{32}$/);
   });
+
+  it("anti-doublon : deux ingestions du même item → même clé", () => {
+    // À la re-ingestion, l'item garde son guid : la clé est stable, donc
+    // l'upsert vise la même ligne (pas de doublon, état Read préservé — ADR 0001).
+    const ingest1: ArticleItem = {
+      guid: "article-42",
+      link: "https://example.com/42",
+      title: "Titre v1",
+    };
+    const ingest2: ArticleItem = {
+      guid: "article-42",
+      link: "https://example.com/42?utm=x", // le lien change…
+      title: "Titre corrigé", // …le titre aussi
+    };
+    expect(articleKey(ingest2, "f1")).toBe(articleKey(ingest1, "f1"));
+  });
 });

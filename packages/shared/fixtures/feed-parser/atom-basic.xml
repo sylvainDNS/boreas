@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Flux Atom de démonstration</title>
+  <link rel="self" href="https://example.com/atom.xml"/>
+  <entry>
+    <title>Article Atom</title>
+    <id>urn:uuid:1225c695-cfb8-4ebb-aaaa-80da344efa6a</id>
+    <link rel="alternate" href="https://example.com/atom/1"/>
+    <link rel="enclosure" type="audio/mpeg" length="12345" href="https://example.com/audio/1.mp3"/>
+    <published>2026-06-01T12:00:00Z</published>
+    <updated>2026-06-01T13:00:00Z</updated>
+    <content type="html">&lt;p&gt;Contenu de l'entrée Atom.&lt;/p&gt;</content>
+  </entry>
+</feed>

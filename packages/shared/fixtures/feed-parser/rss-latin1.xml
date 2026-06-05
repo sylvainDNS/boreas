@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<rss version="2.0">
+  <channel>
+    <title>Café littéraire</title>
+    <item>
+      <title>Crème brûlée à la française</title>
+      <link>https://example.com/latin1</link>
+      <guid>latin1-1</guid>
+      <description>Déjà vu, où êtes-vous ?</description>
+      <pubDate>Mon, 01 Jun 2026 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

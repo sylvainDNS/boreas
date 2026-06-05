@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Flux sans date</title>
+    <item>
+      <title>Article sans pubDate</title>
+      <link>https://example.com/no-date</link>
+      <guid>no-date-1</guid>
+      <description>Pas de date de publication.</description>
+    </item>
+  </channel>
+</rss>

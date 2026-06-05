@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Flux daté dans le futur</title>
+    <item>
+      <title>Article du futur</title>
+      <link>https://example.com/future</link>
+      <guid>future-1</guid>
+      <pubDate>Fri, 01 Jan 2106 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

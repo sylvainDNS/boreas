@@ -1,0 +1,7 @@
+# Variables locales de `wrangler dev` (copier en .dev.vars, gitignoré).
+# En dev, ENVIRONMENT != production → l'e-mail est mocké : le magic link
+# s'affiche dans la console de l'API au lieu d'être envoyé.
+HMAC_SECRET=dev-secret-not-for-prod
+ENVIRONMENT=development
+APP_BASE_URL=http://localhost:5173
+EMAIL_FROM=noreply@boreas.sylvaindenyse.me

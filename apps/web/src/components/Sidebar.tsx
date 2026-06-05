@@ -1,4 +1,6 @@
-import { Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { AUTH_QUERY_KEY, logout } from "../lib/auth";
 import { folders, totalUnread } from "../mock";
 import { ThemeToggle } from "./ThemeToggle";
 import { CountBadge } from "./ui/Badge";
@@ -10,6 +12,17 @@ const itemActive = "bg-surface-2 font-medium text-accent";
 
 /** Colonne de navigation : marque, vues globales, Folders/Feeds, thème, réglages. */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  async function handleLogout() {
+    await logout();
+    // Marque la session comme expirée puis renvoie vers /login.
+    queryClient.setQueryData(AUTH_QUERY_KEY, false);
+    onNavigate?.();
+    await navigate({ to: "/login" });
+  }
+
   return (
     <div className="flex h-full flex-col bg-surface">
       <div className="flex h-14 items-center px-4">
@@ -78,6 +91,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <span aria-hidden>⚙</span>
           <span>Réglages</span>
         </Link>
+        <button type="button" onClick={handleLogout} className={itemBase}>
+          <span aria-hidden>⎋</span>
+          <span>Se déconnecter</span>
+        </button>
       </div>
     </div>
   );

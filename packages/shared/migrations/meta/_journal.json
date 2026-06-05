@@ -15,6 +15,13 @@
       "when": 1779916758238,
       "tag": "0001_seed_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780402663920,
+      "tag": "0002_overjoyed_swarm",
+      "breakpoints": true
     }
   ]
 }

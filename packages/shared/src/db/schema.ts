@@ -83,9 +83,9 @@ export const feeds = sqliteTable("feeds", {
  * l'index unique correspondant garantit la déduplication par flux.
  *
  * D1 porte les métadonnées + un résumé texte fourni par le flux ; le HTML plein
- * extrait+sanitizé (#7) vit en R2, référencé par `content_key`. L'état `saved`
- * arrive en #9 ; `read` bascule à l'ouverture de l'article (#7) et via le toggle
- * manuel (#8).
+ * extrait+sanitizé (#7) vit en R2, référencé par `content_key`. `read` bascule à
+ * l'ouverture de l'article (#7) et via le toggle manuel (#8) ; `saved` conserve
+ * l'Article hors flux et le soustrait à la purge (#9, rétention vérifiée par #15).
  */
 export const articles = sqliteTable(
   "articles",
@@ -113,6 +113,8 @@ export const articles = sqliteTable(
     enclosures: text("enclosures"),
     /** État Read (#8) ; les articles sont backfillés en non-lu. */
     read: integer("read", { mode: "boolean" }).notNull().default(false),
+    /** État Saved (#9) : conserve l'Article hors flux, jamais purgé (#15). */
+    saved: integer("saved", { mode: "boolean" }).notNull().default(false),
     /** Horodatage d'ingestion ISO UTC — clé de tri de la pagination keyset. */
     fetched_at: text("fetched_at")
       .notNull()

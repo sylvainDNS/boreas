@@ -1,0 +1,1 @@
+ALTER TABLE `articles` ADD `saved` integer DEFAULT false NOT NULL;

@@ -13,6 +13,7 @@ import {
   markAllReadMutationOptions,
   toArticle,
   toggleArticleReadMutationOptions,
+  toggleArticleSavedMutationOptions,
 } from "../lib/articles";
 
 /** Vue d'accueil « Tous les non-lus » (PRD US #18), alimentée par l'API (#6/#8). */
@@ -30,6 +31,9 @@ function UnreadView() {
   const counts = useQuery(articleCountsQueryOptions());
 
   const toggleRead = useMutation(toggleArticleReadMutationOptions(queryClient));
+  const toggleSaved = useMutation(
+    toggleArticleSavedMutationOptions(queryClient),
+  );
   const markAllRead = useMutation(markAllReadMutationOptions(queryClient));
 
   // Mémoïsé : la liste n'est recalculée que lorsque de nouvelles pages arrivent,
@@ -51,6 +55,10 @@ function UnreadView() {
     (id: string, read: boolean) => toggleRead.mutate({ id, read }),
     [toggleRead],
   );
+  const onToggleSaved = useCallback(
+    (id: string, saved: boolean) => toggleSaved.mutate({ id, saved }),
+    [toggleSaved],
+  );
   const onMarkAllRead = useCallback(
     () => markAllRead.mutate({ scope: "global" }),
     [markAllRead],
@@ -70,6 +78,7 @@ function UnreadView() {
       showRead={showRead}
       onToggleShowRead={() => setShowRead((v) => !v)}
       onToggleRead={onToggleRead}
+      onToggleSaved={onToggleSaved}
       onMarkAllRead={onMarkAllRead}
     />
   );

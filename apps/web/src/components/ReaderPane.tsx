@@ -1,5 +1,6 @@
 import {
   type UseQueryResult,
+  useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import {
   type ArticleDetail,
   articleDetailQueryOptions,
   setArticleReadInListCaches,
+  toggleArticleSavedMutationOptions,
 } from "../lib/articles";
 import { EmptyState } from "./EmptyState";
 import { buttonClasses } from "./ui/Button";
@@ -23,6 +25,9 @@ import { buttonClasses } from "./ui/Button";
 export function ReaderPane({ article }: { article: Article }) {
   const queryClient = useQueryClient();
   const detail = useQuery(articleDetailQueryOptions(article.id));
+  const toggleSaved = useMutation(
+    toggleArticleSavedMutationOptions(queryClient),
+  );
 
   useEffect(() => {
     // N'aligne le cache que si l'article était non-lu : le GET du détail vient
@@ -50,6 +55,16 @@ export function ReaderPane({ article }: { article: Article }) {
       <div className="mb-8 flex flex-wrap items-center gap-3 border-border border-b pb-4 text-muted text-sm">
         <span>{article.time}</span>
         <span className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              toggleSaved.mutate({ id: article.id, saved: !article.saved })
+            }
+            aria-pressed={article.saved}
+            className={buttonClasses("outline")}
+          >
+            {article.saved ? "★ Sauvegardé" : "☆ Sauvegarder"}
+          </button>
           {link && (
             <a
               href={link}

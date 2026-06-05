@@ -23,7 +23,7 @@ export const articlesRoutes = new Hono<{ Bindings: Env }>();
  */
 articlesRoutes.get("/", async (c) => {
   const filter = c.req.query("filter") ?? "unread";
-  if (filter !== "unread" && filter !== "all") {
+  if (filter !== "unread" && filter !== "all" && filter !== "saved") {
     return c.json({ error: "unsupported_filter" }, 400);
   }
 
@@ -37,8 +37,14 @@ articlesRoutes.get("/", async (c) => {
         ),
       )
     : undefined;
-  // `filter=all` lève le prédicat read pour servir aussi les lus.
-  const unreadOnly = filter === "unread" ? eq(articles.read, false) : undefined;
+  // `filter=unread` ne sert que les non-lus ; `filter=saved` ne sert que les
+  // Saved (#9) ; `filter=all` lève tout prédicat pour servir aussi les lus.
+  const scope =
+    filter === "unread"
+      ? eq(articles.read, false)
+      : filter === "saved"
+        ? eq(articles.saved, true)
+        : undefined;
 
   const db = getDb(c.env.DB);
   const rows = await db
@@ -50,13 +56,14 @@ articlesRoutes.get("/", async (c) => {
       link: articles.link,
       publishedAt: articles.published_at,
       read: articles.read,
+      saved: articles.saved,
       fetchedAt: articles.fetched_at,
       feedTitle: feeds.title,
       feedUrl: feeds.url,
     })
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(unreadOnly, keyset))
+    .where(and(scope, keyset))
     .orderBy(desc(articles.fetched_at), desc(articles.id))
     .limit(PAGE_SIZE + 1);
 
@@ -78,6 +85,7 @@ articlesRoutes.get("/", async (c) => {
       link: row.link,
       publishedAt: row.publishedAt,
       read: row.read,
+      saved: row.saved,
     })),
     nextCursor,
   });
@@ -102,10 +110,16 @@ articlesRoutes.get("/counts", async (c) => {
   return c.json({ total, byFeed: rows });
 });
 
-const patchSchema = z.object({ read: z.boolean() });
+const patchSchema = z
+  .object({ read: z.boolean().optional(), saved: z.boolean().optional() })
+  .refine((d) => d.read !== undefined || d.saved !== undefined, {
+    message: "no_field",
+  });
 
 /**
- * Bascule manuelle Read↔non-lu d'un Article (#8), indépendamment de l'ouverture.
+ * Bascule manuelle de l'état d'un Article (#8/#9) : `read` (lu↔non-lu) et/ou
+ * `saved` (sauvé↔non-sauvé), indépendamment de l'ouverture. Au moins un champ
+ * doit être fourni ; la réponse n'écho que les champs effectivement modifiés.
  */
 articlesRoutes.patch("/:id", async (c) => {
   const parsed = patchSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -115,16 +129,19 @@ articlesRoutes.patch("/:id", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
+  // `parsed.data` ne contient que les champs réellement fournis (zod `.optional`
+  // n'injecte pas les clés absentes) et `.refine` en garantit au moins un : on
+  // l'utilise directement comme jeu de colonnes à mettre à jour et comme écho.
   const updated = await db
     .update(articles)
-    .set({ read: parsed.data.read })
+    .set(parsed.data)
     .where(eq(articles.id, id))
     .returning({ id: articles.id });
 
   if (updated.length === 0) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.json({ id, read: parsed.data.read });
+  return c.json({ id, ...parsed.data });
 });
 
 const markReadSchema = z.discriminatedUnion("scope", [

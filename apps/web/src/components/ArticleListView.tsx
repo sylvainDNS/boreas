@@ -29,6 +29,8 @@ interface ArticleListViewProps {
   onToggleShowRead?: () => void;
   /** Bascule Read↔non-lu d'un article (#8). `read` = nouvel état souhaité. */
   onToggleRead?: (id: string, read: boolean) => void;
+  /** Bascule Saved↔non-Saved d'un article (#9). `saved` = nouvel état souhaité. */
+  onToggleSaved?: (id: string, saved: boolean) => void;
   /** « Tout marquer comme lu » sur la portée de la vue (#8). */
   onMarkAllRead?: () => void;
 }
@@ -49,6 +51,7 @@ export function ArticleListView({
   showRead,
   onToggleShowRead,
   onToggleRead,
+  onToggleSaved,
   onMarkAllRead,
 }: ArticleListViewProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -131,6 +134,11 @@ export function ArticleListView({
                   onToggleRead={
                     onToggleRead
                       ? (read) => onToggleRead(article.id, read)
+                      : undefined
+                  }
+                  onToggleSaved={
+                    onToggleSaved
+                      ? (saved) => onToggleSaved(article.id, saved)
                       : undefined
                   }
                 />

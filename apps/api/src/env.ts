@@ -2,6 +2,8 @@
 export interface Env {
   /** Base D1 partagée avec le Cron. */
   DB: D1Database;
+  /** Bucket R2 : HTML plein extrait (`articles/{id}.html`) + images proxifiées (#16). */
+  BUCKET: R2Bucket;
   /** Envoi du magic link (Cloudflare Email Service). */
   EMAIL: SendEmail;
   /** Clé HMAC partagée (api + cron) pour signer jetons et sessions. Secret Worker. */

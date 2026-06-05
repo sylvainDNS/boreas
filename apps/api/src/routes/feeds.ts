@@ -1,3 +1,5 @@
+import { extractArticle } from "@boreas/content-extractor";
+import { sanitizeHtml } from "@boreas/html-sanitizer";
 import {
   articleKey,
   articles,
@@ -6,6 +8,7 @@ import {
   parseFeed,
   sqlUtcNow,
 } from "@boreas/shared";
+import { signImageUrl } from "@boreas/shared/crypto";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -17,11 +20,17 @@ const subscribeSchema = z.object({ url: z.string().url() });
 // nombre de colonnes posées par ligne (avec marge) pour qu'elle s'ajuste
 // automatiquement si une colonne est ajoutée à `articles` (#7+), au lieu d'un
 // nombre magique qui dépasserait la limite silencieusement.
-const ARTICLE_INSERT_COLUMNS = 10;
+const ARTICLE_INSERT_COLUMNS = 11;
 const D1_MAX_BOUND_PARAMS = 100;
 const INSERT_CHUNK = Math.floor(
   (D1_MAX_BOUND_PARAMS - 1) / ARTICLE_INSERT_COLUMNS,
 );
+
+// Concurrence max de l'extraction+sanitization+put R2 par lot. Chaque item
+// déclenche un parse linkedom (CPU) + un put R2 (sous-requête) ; un flux peut
+// contenir des centaines d'items, donc on borne pour ne pas saturer le budget
+// CPU/sous-requêtes du Worker sur le chemin synchrone d'abonnement.
+const EXTRACT_CONCURRENCY = 6;
 
 /**
  * Routes Feed (montées sur /api/feeds), sous le middleware de session.
@@ -85,20 +94,41 @@ feedsRoutes.post("/", async (c) => {
   const feedId = crypto.randomUUID();
   await db.insert(feeds).values({ id: feedId, url, title: feed.title });
 
+  // Extraction + sanitization + stockage R2 du contenu plein (ADR 0003/0007),
+  // par lots à concurrence bornée (cf. EXTRACT_CONCURRENCY). Un échec sur un
+  // article le laisse sans contenu (content_key null) sans bloquer l'abonnement.
   const now = sqlUtcNow();
-  const rows = feed.items.map((item) => ({
-    id: crypto.randomUUID(),
-    feed_id: feedId,
-    article_key: articleKey(item, feedId),
-    title: item.title,
-    link: item.link,
-    summary: item.summary,
-    published_at: item.publishedAt,
-    enclosures:
-      item.enclosures.length > 0 ? JSON.stringify(item.enclosures) : null,
-    read: false,
-    fetched_at: now,
-  }));
+  const secret = c.env.HMAC_SECRET;
+  const buildRow = async (item: (typeof feed.items)[number]) => {
+    const id = crypto.randomUUID();
+    const contentKey = await extractAndStore(
+      c.env.BUCKET,
+      secret,
+      id,
+      item.content,
+      item.link ?? url,
+    );
+    return {
+      id,
+      feed_id: feedId,
+      article_key: articleKey(item, feedId),
+      title: item.title,
+      link: item.link,
+      summary: item.summary,
+      published_at: item.publishedAt,
+      enclosures:
+        item.enclosures.length > 0 ? JSON.stringify(item.enclosures) : null,
+      content_key: contentKey,
+      read: false,
+      fetched_at: now,
+    };
+  };
+
+  const rows: Awaited<ReturnType<typeof buildRow>>[] = [];
+  for (let i = 0; i < feed.items.length; i += EXTRACT_CONCURRENCY) {
+    const batch = feed.items.slice(i, i + EXTRACT_CONCURRENCY);
+    rows.push(...(await Promise.all(batch.map(buildRow))));
+  }
 
   // Insertion par lots : D1 borne une requête à 100 variables liées. Avec
   // ~10 colonnes par ligne, on insère au plus 9 articles par requête.
@@ -119,3 +149,34 @@ feedsRoutes.post("/", async (c) => {
     201,
   );
 });
+
+/**
+ * Extrait + sanitize le contenu HTML d'un item et le stocke en R2 sous
+ * `articles/{id}.html`. Renvoie la clé R2, ou `null` si le flux ne fournit pas
+ * de contenu ou en cas d'échec — l'abonnement n'est jamais interrompu pour un
+ * seul article (try/catch, log).
+ */
+async function extractAndStore(
+  bucket: R2Bucket,
+  secret: string,
+  id: string,
+  rawContent: string | null,
+  baseUrl: string | null,
+): Promise<string | null> {
+  if (!rawContent) return null;
+  try {
+    const extracted = extractArticle(rawContent, baseUrl ?? "");
+    const safe = sanitizeHtml(extracted.content, {
+      baseUrl: baseUrl ?? undefined,
+      signImageSrc: (src) => signImageUrl(secret, src),
+    });
+    const key = `articles/${id}.html`;
+    await bucket.put(key, safe, {
+      httpMetadata: { contentType: "text/html; charset=utf-8" },
+    });
+    return key;
+  } catch (err) {
+    console.error("[feeds] extraction/stockage du contenu échoué", err);
+    return null;
+  }
+}

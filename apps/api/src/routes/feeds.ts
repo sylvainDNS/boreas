@@ -1,4 +1,11 @@
-import { articleKey, articles, feeds, getDb, parseFeed } from "@boreas/shared";
+import {
+  articleKey,
+  articles,
+  feeds,
+  getDb,
+  parseFeed,
+  sqlUtcNow,
+} from "@boreas/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -6,8 +13,15 @@ import type { Env } from "../env";
 
 const subscribeSchema = z.object({ url: z.string().url() });
 
-/** Lignes par insert : D1 plafonne à 100 variables liées (~10 colonnes/ligne). */
-const INSERT_CHUNK = 9;
+// D1 plafonne une requête à 100 variables liées. On dérive la taille de lot du
+// nombre de colonnes posées par ligne (avec marge) pour qu'elle s'ajuste
+// automatiquement si une colonne est ajoutée à `articles` (#7+), au lieu d'un
+// nombre magique qui dépasserait la limite silencieusement.
+const ARTICLE_INSERT_COLUMNS = 10;
+const D1_MAX_BOUND_PARAMS = 100;
+const INSERT_CHUNK = Math.floor(
+  (D1_MAX_BOUND_PARAMS - 1) / ARTICLE_INSERT_COLUMNS,
+);
 
 /**
  * Routes Feed (montées sur /api/feeds), sous le middleware de session.
@@ -71,7 +85,7 @@ feedsRoutes.post("/", async (c) => {
   const feedId = crypto.randomUUID();
   await db.insert(feeds).values({ id: feedId, url, title: feed.title });
 
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const now = sqlUtcNow();
   const rows = feed.items.map((item) => ({
     id: crypto.randomUUID(),
     feed_id: feedId,

@@ -92,6 +92,13 @@ export const ARTICLES_LIST_KEY = ["articles", "list"] as const;
 export const ARTICLES_COUNTS_KEY = ["articles", "counts"] as const;
 
 /**
+ * Intervalle de poll des listes/compteurs (#10). En complément du refetch au
+ * focus (déjà actif, `main.tsx`), il fait remonter les articles ingérés en
+ * arrière-plan par le Cron/Queue sans action de l'utilisateur.
+ */
+const POLL_INTERVAL_MS = 60_000;
+
+/**
  * Query infinie de la liste : pagination keyset par `cursor`, du plus récent au
  * plus ancien. La clé inclut le `filter` pour que « afficher / masquer les lus »
  * conserve deux caches distincts. Le scroll infini déclenche `fetchNextPage`.
@@ -106,6 +113,7 @@ export function listArticlesInfiniteQueryOptions(filter: ArticleFilter) {
       return apiFetch<ArticlesPage>(`/articles?${params.toString()}`);
     },
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    refetchInterval: POLL_INTERVAL_MS,
   });
 }
 
@@ -119,7 +127,25 @@ export function articleCountsQueryOptions() {
   return queryOptions({
     queryKey: ARTICLES_COUNTS_KEY,
     queryFn: () => apiFetch<ArticleCounts>("/articles/counts"),
+    refetchInterval: POLL_INTERVAL_MS,
   });
+}
+
+/**
+ * Options de mutation du Refresh manuel global (`POST /refresh`). Le serveur
+ * **enqueue** un message par Feed (ingestion async via Cron/Queue, ADR 0002),
+ * puis on invalide listes + compteurs : conjuguée au poll, l'invalidation fait
+ * apparaître les nouveaux articles dès que la Queue les a ingérés (#10).
+ */
+export function refreshMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: () =>
+      apiFetch<{ enqueued: number }>("/refresh", { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+    },
+  };
 }
 
 /**

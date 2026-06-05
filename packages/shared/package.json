@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@boreas/content-extractor": "workspace:*",
+    "@boreas/html-sanitizer": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "5.8.0"
   },

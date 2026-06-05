@@ -62,8 +62,8 @@ export const authTokens = sqliteTable("auth_tokens", {
  * Feed : source distante RSS/Atom identifiée par son URL de flux directe
  * (CONTEXT.md). Un abonnement = une ligne ; l'unicité de `url` refuse les
  * doublons d'abonnement. Les colonnes de polling (etag, last_modified,
- * next_check_at) et `folder_id` seront ajoutées par #10/#13 (expand-only,
- * ADR 0011).
+ * last_check_at, next_check_at) pilotent l'ingestion Cron+Queues (#10) ;
+ * `folder_id` sera ajouté par #13 (expand-only, ADR 0011).
  */
 export const feeds = sqliteTable("feeds", {
   /** UUID applicatif (crypto.randomUUID), stable et indépendant de l'ordre d'insertion. */
@@ -72,6 +72,14 @@ export const feeds = sqliteTable("feeds", {
   url: text("url").notNull().unique(),
   /** Titre du flux tel que fourni par la source (nullable). */
   title: text("title"),
+  /** ETag du dernier 200, rejoué en `If-None-Match` au prochain conditional GET (#10). */
+  etag: text("etag"),
+  /** Last-Modified du dernier 200, rejoué en `If-Modified-Since` (#10). */
+  last_modified: text("last_modified"),
+  /** Dernier passage d'ingestion (succès ou échec), ISO 8601 UTC (#10). */
+  last_check_at: text("last_check_at"),
+  /** Échéance de prochaine vérif, étalée par jitter (ADR 0002) ; null = dû immédiatement (#10). */
+  next_check_at: text("next_check_at"),
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),

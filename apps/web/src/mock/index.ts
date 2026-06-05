@@ -62,6 +62,7 @@ export const articles: MockArticle[] = [
     excerpt:
       "Entre moteurs de rendu alternatifs et intégrations d'IA locales, les éditeurs repensent ce qu'est un navigateur en 2026.",
     time: "il y a 14 min",
+    link: null,
     unread: true,
     saved: false,
   },
@@ -73,6 +74,7 @@ export const articles: MockArticle[] = [
     excerpt:
       "Workers, D1, R2 et Queues pour un coût quasi nul. Retour d'expérience après six mois en production.",
     time: "il y a 38 min",
+    link: null,
     unread: true,
     saved: false,
   },
@@ -85,6 +87,7 @@ export const articles: MockArticle[] = [
     excerpt:
       "Une analyse chiffrée de la latence perçue et de son effet cumulé sur la productivité d'une journée de travail.",
     time: "il y a 2 h",
+    link: null,
     unread: true,
     saved: false,
   },
@@ -96,6 +99,7 @@ export const articles: MockArticle[] = [
     excerpt:
       "Les nouvelles trajectoires d'émissions présentées cette semaine marquent une inflexion notable.",
     time: "il y a 3 h",
+    link: null,
     unread: true,
     saved: false,
   },
@@ -107,6 +111,7 @@ export const articles: MockArticle[] = [
     excerpt:
       "Pourquoi raisonner en luminance perceptuelle change la façon de construire un système de couleurs.",
     time: "il y a 5 h",
+    link: null,
     unread: false,
     saved: false,
   },
@@ -118,16 +123,10 @@ export const articles: MockArticle[] = [
     excerpt:
       "Démonstration d'un modèle minimal embarquable directement dans le navigateur.",
     time: "hier",
+    link: null,
     unread: false,
     saved: true,
   },
-];
-
-export const articleBody: string[] = [
-  "J'ai longtemps cherché un lecteur RSS qui ne dépende d'aucun service tiers, sans abonnement mensuel, et qui reste sous mon contrôle. La plupart des solutions auto-hébergées demandent un serveur à maintenir — exactement ce que je voulais éviter.",
-  "L'idée : tout faire tenir sur la plateforme Cloudflare. Le SPA est servi par Pages, l'API tourne sur un Worker, l'ingestion des flux passe par un Cron déclenchant des Queues, le tout stocké dans D1 pour les métadonnées et R2 pour le contenu extrait et les images.",
-  "Le point le plus délicat fut l'extraction du contenu complet : chaque article est nettoyé puis archivé dès son arrivée, afin qu'il reste lisible même si la source disparaît. Les images sont reproxifiées et signées pour préserver la vie privée.",
-  "Six mois plus tard, l'ensemble tourne sans intervention. Le backoff sur les flux défaillants évite de gaspiller des ressources, et la purge à 60 jours garde la base légère.",
 ];
 
 // --- Sélecteurs : jointure article↔feed par `feedId` (jamais par le nom).

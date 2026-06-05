@@ -20,7 +20,7 @@ const subscribeSchema = z.object({ url: z.string().url() });
 // nombre de colonnes posées par ligne (avec marge) pour qu'elle s'ajuste
 // automatiquement si une colonne est ajoutée à `articles` (#7+), au lieu d'un
 // nombre magique qui dépasserait la limite silencieusement.
-const ARTICLE_INSERT_COLUMNS = 11;
+const ARTICLE_INSERT_COLUMNS = 12;
 const D1_MAX_BOUND_PARAMS = 100;
 const INSERT_CHUNK = Math.floor(
   (D1_MAX_BOUND_PARAMS - 1) / ARTICLE_INSERT_COLUMNS,

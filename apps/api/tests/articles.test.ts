@@ -22,6 +22,7 @@ async function seedArticle(opts: {
   feedId?: string;
   contentKey?: string | null;
   read?: boolean;
+  saved?: boolean;
 }): Promise<void> {
   const feedId = opts.feedId ?? "feed-1";
   const feedTitle = feedId === "feed-1" ? "Mon flux" : `Flux ${feedId}`;
@@ -31,7 +32,7 @@ async function seedArticle(opts: {
     .bind(feedId, `https://src.example/${feedId}.xml`, feedTitle)
     .run();
   await env.DB.prepare(
-    "INSERT INTO articles (id, feed_id, article_key, title, link, content_key, read, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO articles (id, feed_id, article_key, title, link, content_key, read, saved, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   )
     .bind(
       opts.id,
@@ -41,6 +42,7 @@ async function seedArticle(opts: {
       "https://src.example/article",
       opts.contentKey ?? null,
       opts.read ? 1 : 0,
+      opts.saved ? 1 : 0,
       "2026-06-05T12:00:00Z",
     )
     .run();
@@ -52,6 +54,14 @@ async function readState(id: string): Promise<number | undefined> {
     .bind(id)
     .first<{ read: number }>();
   return row?.read;
+}
+
+/** Lit l'état Saved d'un Article en base. */
+async function savedState(id: string): Promise<number | undefined> {
+  const row = await env.DB.prepare("SELECT saved FROM articles WHERE id = ?")
+    .bind(id)
+    .first<{ saved: number }>();
+  return row?.saved;
 }
 
 beforeEach(async () => {
@@ -154,6 +164,33 @@ describe("GET /api/articles — filtre lus/non-lus (#8)", () => {
   });
 });
 
+describe("GET /api/articles?filter=saved — vue Saved (#9)", () => {
+  it("ne sert que les Saved et expose l'état saved", async () => {
+    await seedArticle({ id: "art-plain", saved: false });
+    await seedArticle({ id: "art-saved", saved: true });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles?filter=saved`,
+      authed(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      articles: { id: string; saved: boolean }[];
+    };
+    expect(body.articles.map((a) => a.id)).toEqual(["art-saved"]);
+    expect(body.articles[0]?.saved).toBe(true);
+  });
+
+  it("expose saved aussi dans les autres filtres", async () => {
+    await seedArticle({ id: "art-saved", saved: true, read: true });
+
+    const all = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=all`, authed())
+    ).json()) as { articles: { id: string; saved: boolean }[] };
+    expect(all.articles.find((a) => a.id === "art-saved")?.saved).toBe(true);
+  });
+});
+
 describe("PATCH /api/articles/:id — bascule Read (#8)", () => {
   it("marque lu puis non-lu", async () => {
     await seedArticle({ id: "art-1", read: false });
@@ -191,12 +228,67 @@ describe("PATCH /api/articles/:id — bascule Read (#8)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("renvoie 400 quand aucun champ n'est fourni", async () => {
+    await seedArticle({ id: "art-1", read: false });
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/art-1`,
+      authed({ method: "PATCH", body: JSON.stringify({}) }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("refuse l'accès sans session (garde)", async () => {
     const res = await SELF.fetch(`${ORIGIN}/api/articles/art-1`, {
       method: "PATCH",
       body: JSON.stringify({ read: true }),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("PATCH /api/articles/:id — bascule Saved (#9)", () => {
+  it("sauve puis désauve, sans toucher l'état Read", async () => {
+    await seedArticle({ id: "art-1", read: false, saved: false });
+
+    const toSaved = await SELF.fetch(
+      `${ORIGIN}/api/articles/art-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ saved: true }) }),
+    );
+    expect(toSaved.status).toBe(200);
+    expect(await toSaved.json()).toEqual({ id: "art-1", saved: true });
+    expect(await savedState("art-1")).toBe(1);
+    expect(await readState("art-1")).toBe(0);
+
+    const toUnsaved = await SELF.fetch(
+      `${ORIGIN}/api/articles/art-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ saved: false }) }),
+    );
+    expect(toUnsaved.status).toBe(200);
+    expect(await savedState("art-1")).toBe(0);
+  });
+
+  it("bascule read et saved dans une même requête", async () => {
+    await seedArticle({ id: "art-1", read: false, saved: false });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/art-1`,
+      authed({
+        method: "PATCH",
+        body: JSON.stringify({ read: true, saved: true }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "art-1", read: true, saved: true });
+    expect(await readState("art-1")).toBe(1);
+    expect(await savedState("art-1")).toBe(1);
+  });
+
+  it("renvoie 404 sur un id inconnu", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/inexistant`,
+      authed({ method: "PATCH", body: JSON.stringify({ saved: true }) }),
+    );
+    expect(res.status).toBe(404);
   });
 });
 

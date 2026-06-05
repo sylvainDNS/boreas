@@ -237,7 +237,7 @@ describe("GET /api/articles?filter=unread — pagination keyset", () => {
 
   it("rejette un filtre non supporté (400)", async () => {
     const res = await SELF.fetch(
-      `${ORIGIN}/api/articles?filter=saved`,
+      `${ORIGIN}/api/articles?filter=bogus`,
       authed(),
     );
     expect(res.status).toBe(400);

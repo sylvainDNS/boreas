@@ -11,6 +11,7 @@ import {
   articleCountsQueryOptions,
   listArticlesInfiniteQueryOptions,
   markAllReadMutationOptions,
+  refreshMutationOptions,
   toArticle,
   toggleArticleReadMutationOptions,
   toggleArticleSavedMutationOptions,
@@ -35,6 +36,7 @@ function UnreadView() {
     toggleArticleSavedMutationOptions(queryClient),
   );
   const markAllRead = useMutation(markAllReadMutationOptions(queryClient));
+  const refresh = useMutation(refreshMutationOptions(queryClient));
 
   // Mémoïsé : la liste n'est recalculée que lorsque de nouvelles pages arrivent,
   // pas à chaque rendu (sélection d'article, etc.).
@@ -63,6 +65,7 @@ function UnreadView() {
     () => markAllRead.mutate({ scope: "global" }),
     [markAllRead],
   );
+  const onRefresh = useCallback(() => refresh.mutate(), [refresh]);
 
   return (
     <ArticleListView
@@ -80,6 +83,8 @@ function UnreadView() {
       onToggleRead={onToggleRead}
       onToggleSaved={onToggleSaved}
       onMarkAllRead={onMarkAllRead}
+      onRefresh={onRefresh}
+      isRefreshing={refresh.isPending}
     />
   );
 }

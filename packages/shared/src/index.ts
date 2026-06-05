@@ -8,4 +8,12 @@ export type {
   ParsedItem,
 } from "./feed-parser";
 export { parseFeed } from "./feed-parser";
+export type { IngestionMessage, IngestResult } from "./ingestion";
+export {
+  buildConditionalHeaders,
+  computeNextCheckAt,
+  enqueueFeedIds,
+  getDueFeedIds,
+  ingestFeed,
+} from "./ingestion";
 export { sqlUtcNow } from "./timestamp";

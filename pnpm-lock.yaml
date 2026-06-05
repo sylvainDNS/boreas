@@ -166,6 +166,12 @@ importers:
 
   packages/shared:
     dependencies:
+      '@boreas/content-extractor':
+        specifier: workspace:*
+        version: link:../content-extractor
+      '@boreas/html-sanitizer':
+        specifier: workspace:*
+        version: link:../html-sanitizer
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260527.1)

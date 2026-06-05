@@ -1,9 +1,13 @@
+import type { IngestionMessage } from "@boreas/shared";
+
 /** Bindings et variables injectés par le runtime Cloudflare dans le Worker API. */
 export interface Env {
   /** Base D1 partagée avec le Cron. */
   DB: D1Database;
   /** Bucket R2 : HTML plein extrait (`articles/{id}.html`) + images proxifiées (#16). */
   BUCKET: R2Bucket;
+  /** Queue d'ingestion (producteur) : `POST /api/refresh` enqueue un message par Feed (#10). */
+  INGESTION_QUEUE: Queue<IngestionMessage>;
   /** Envoi du magic link (Cloudflare Email Service). */
   EMAIL: SendEmail;
   /** Clé HMAC partagée (api + cron) pour signer jetons et sessions. Secret Worker. */

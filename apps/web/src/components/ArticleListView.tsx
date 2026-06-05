@@ -33,6 +33,10 @@ interface ArticleListViewProps {
   onToggleSaved?: (id: string, saved: boolean) => void;
   /** « Tout marquer comme lu » sur la portée de la vue (#8). */
   onMarkAllRead?: () => void;
+  /** Refresh manuel : déclenche une récupération serveur des flux (#10). */
+  onRefresh?: () => void;
+  /** Un refresh est en cours (anime l'icône, désactive le bouton). */
+  isRefreshing?: boolean;
 }
 
 /** Vue générique « liste + lecteur » des tranches de lecture (#6, #8, #9, #13…).
@@ -53,6 +57,8 @@ export function ArticleListView({
   onToggleRead,
   onToggleSaved,
   onMarkAllRead,
+  onRefresh,
+  isRefreshing = false,
 }: ArticleListViewProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   // Cherche la sélection DANS la liste courante : si l'article sélectionné
@@ -103,7 +109,16 @@ export function ArticleListView({
                 {showRead ? "Masquer les lus" : "Afficher les lus"}
               </button>
             )}
-            <IconButton label="Rafraîchir">↻</IconButton>
+            <IconButton
+              label="Rafraîchir"
+              onClick={onRefresh}
+              disabled={!onRefresh || isRefreshing}
+              className="disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <span className={isRefreshing ? "inline-block animate-spin" : ""}>
+                ↻
+              </span>
+            </IconButton>
             <IconButton
               label="Tout marquer comme lu"
               onClick={onMarkAllRead}

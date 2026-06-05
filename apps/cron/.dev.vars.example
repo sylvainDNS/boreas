@@ -1,0 +1,5 @@
+# Variables locales de `wrangler dev` (copier en .dev.vars, gitignoré).
+# HMAC_SECRET doit être IDENTIQUE à celui de l'API : le Cron signe les URLs
+# d'images à l'ingestion, l'API les vérifie au proxy (#16). En prod, c'est un
+# secret Worker partagé (`wrangler secret put HMAC_SECRET`).
+HMAC_SECRET=dev-secret-not-for-prod

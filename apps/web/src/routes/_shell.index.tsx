@@ -1,16 +1,36 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ArticleListView } from "../components/ArticleListView";
-import { toArticle, unreadArticlesInfiniteQueryOptions } from "../lib/articles";
+import {
+  articleCountsQueryOptions,
+  listArticlesInfiniteQueryOptions,
+  markAllReadMutationOptions,
+  toArticle,
+  toggleArticleReadMutationOptions,
+} from "../lib/articles";
 
-/** Vue d'accueil « Tous les non-lus » (PRD US #18), alimentée par l'API (#6). */
+/** Vue d'accueil « Tous les non-lus » (PRD US #18), alimentée par l'API (#6/#8). */
 export const Route = createFileRoute("/_shell/")({
   component: UnreadView,
 });
 
 function UnreadView() {
-  const query = useInfiniteQuery(unreadArticlesInfiniteQueryOptions());
+  const queryClient = useQueryClient();
+  // Les lus sont affichés par défaut (#8) ; l'interrupteur bascule sur unread.
+  const [showRead, setShowRead] = useState(true);
+  const query = useInfiniteQuery(
+    listArticlesInfiniteQueryOptions(showRead ? "all" : "unread"),
+  );
+  const counts = useQuery(articleCountsQueryOptions());
+
+  const toggleRead = useMutation(toggleArticleReadMutationOptions(queryClient));
+  const markAllRead = useMutation(markAllReadMutationOptions(queryClient));
 
   // Mémoïsé : la liste n'est recalculée que lorsque de nouvelles pages arrivent,
   // pas à chaque rendu (sélection d'article, etc.).
@@ -27,16 +47,30 @@ function UnreadView() {
     void fetchNextPage();
   }, [fetchNextPage]);
 
+  const onToggleRead = useCallback(
+    (id: string, read: boolean) => toggleRead.mutate({ id, read }),
+    [toggleRead],
+  );
+  const onMarkAllRead = useCallback(
+    () => markAllRead.mutate({ scope: "global" }),
+    [markAllRead],
+  );
+
   return (
     <ArticleListView
       title="Tous les non-lus"
       articles={articles}
-      emptyLabel="Tout est lu 🎉"
+      emptyLabel={showRead ? "Aucun article à afficher." : "Tout est lu 🎉"}
+      unreadCount={counts.data?.total}
       isLoading={query.isLoading}
       isError={query.isError}
       hasNextPage={query.hasNextPage}
       isFetchingNextPage={query.isFetchingNextPage}
       onEndReached={onEndReached}
+      showRead={showRead}
+      onToggleShowRead={() => setShowRead((v) => !v)}
+      onToggleRead={onToggleRead}
+      onMarkAllRead={onMarkAllRead}
     />
   );
 }

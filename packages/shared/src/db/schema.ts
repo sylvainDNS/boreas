@@ -82,10 +82,10 @@ export const feeds = sqliteTable("feeds", {
  * `(feed_id, article_key)` calculée par `articleKey()` (ADR 0001) ;
  * l'index unique correspondant garantit la déduplication par flux.
  *
- * En #6 on ne stocke que les métadonnées + un résumé texte fourni par le flux :
- * le contenu plein extrait (R2, sanitization) arrive en #7. L'état `saved`
- * et le toggle de `read` arrivent en #9/#8 ; seul le défaut `read=false`
- * (backfill en non-lu) sert ici.
+ * D1 porte les métadonnées + un résumé texte fourni par le flux ; le HTML plein
+ * extrait+sanitizé (#7) vit en R2, référencé par `content_key`. L'état `saved`
+ * arrive en #9 ; `read` bascule à l'ouverture de l'article (#7) et via le toggle
+ * manuel (#8).
  */
 export const articles = sqliteTable(
   "articles",
@@ -99,8 +99,14 @@ export const articles = sqliteTable(
     article_key: text("article_key").notNull(),
     title: text("title"),
     link: text("link"),
-    /** Résumé texte (balises retirées). Le contenu plein R2 arrive en #7. */
+    /** Résumé texte (balises retirées) fourni par le flux. */
     summary: text("summary"),
+    /**
+     * Clé de l'objet R2 du HTML plein extrait+sanitizé (`articles/{id}.html`,
+     * ADR 0003/0004/0007), ou null si l'extraction n'a rien produit. Le contenu
+     * lui-même vit en R2, pas en D1 (#7).
+     */
+    content_key: text("content_key"),
     /** Date de publication ISO 8601 UTC, ou null si absente/illisible. */
     published_at: text("published_at"),
     /** Enclosures (média joints) sérialisées en JSON, ou null. */

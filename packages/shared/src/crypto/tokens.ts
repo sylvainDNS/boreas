@@ -1,9 +1,5 @@
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { hmacBase64url, signaturesMatch } from "./hmac";
 
 /**
  * Jetons signés HMAC pour l'auth magic link (ADR 0005).
@@ -46,20 +42,7 @@ function encodePayload(payload: object): string {
 }
 
 function sign(secret: string, encodedPayload: string): string {
-  return createHmac("sha256", secret)
-    .update(encodedPayload)
-    .digest("base64url");
-}
-
-/**
- * Compare deux signatures en temps constant. La vérification de longueur
- * précède `timingSafeEqual` (qui lève si les tailles diffèrent).
- */
-function signaturesMatch(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
+  return hmacBase64url(secret, encodedPayload);
 }
 
 function buildToken(secret: string, payload: object): string {

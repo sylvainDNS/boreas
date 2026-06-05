@@ -22,6 +22,7 @@ export default defineConfig({
           compatibilityDate: "2026-01-01",
           compatibilityFlags: ["nodejs_compat"],
           d1Databases: ["DB"],
+          r2Buckets: ["BUCKET"],
           bindings: {
             TEST_MIGRATIONS: migrations,
             HMAC_SECRET: "test-secret",

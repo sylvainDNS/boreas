@@ -1,3 +1,4 @@
+export { signImageUrl, verifyImageUrl } from "./image-url";
 export type {
   IssuedMagicToken,
   MagicVerification,

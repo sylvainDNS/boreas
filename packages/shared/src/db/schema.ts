@@ -35,4 +35,20 @@ export const settings = sqliteTable(
   ],
 );
 
-// Tables à venir (feeds, articles, folders, auth_tokens) — ajoutées au fil des issues.
+/**
+ * Jetons magic link à usage unique (ADR 0005). On ne stocke que l'empreinte
+ * du jeton (jamais le clair) ; `used` + `expires_at` garantissent l'usage
+ * unique et l'expiration côté serveur. Les sessions, elles, sont stateless
+ * (cookie signé) et n'ont pas de table.
+ */
+export const authTokens = sqliteTable("auth_tokens", {
+  token_hash: text("token_hash").primaryKey(),
+  /** Expiration (epoch secondes). */
+  expires_at: integer("expires_at").notNull(),
+  used: integer("used", { mode: "boolean" }).notNull().default(false),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+});
+
+// Tables à venir (feeds, articles, folders) — ajoutées au fil des issues.

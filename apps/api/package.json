@@ -9,9 +9,12 @@
   },
   "dependencies": {
     "@boreas/shared": "workspace:*",
-    "hono": "^4.12.23"
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.23",
+    "zod": "4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.10",
     "@cloudflare/workers-types": "^4.20260527.1",
     "@types/node": "^25.9.1",
     "typescript": "^6.0.3",

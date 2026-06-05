@@ -3,6 +3,14 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Variables non secrètes. HMAC_SECRET est posé séparément (secret Worker,
+  // partagé avec boreas-cron). En local, .dev.vars surcharge ces valeurs
+  // (ENVIRONMENT=development → e-mail mocké, APP_BASE_URL=localhost).
+  "vars": {
+    "EMAIL_FROM": "noreply@boreas.sylvaindenyse.me",
+    "APP_BASE_URL": "https://boreas.sylvaindenyse.me",
+    "ENVIRONMENT": "production"
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -18,12 +26,14 @@
       "bucket_name": "boreas"
     }
   ],
-  // Envoi du magic link via Cloudflare Email Service vers l'adresse vérifiée. (ADR 0005)
-  // Le destinataire doit être vérifié dans Email Routing avant tout déploiement.
+  // Envoi du magic link via Cloudflare Email Service (domaine expéditeur
+  // boreas.sylvaindenyse.me vérifié dans « Email Sending »). On restreint
+  // l'adresse expéditrice ; le destinataire est borné applicativement à
+  // l'allowed_email. (ADR 0005)
   "send_email": [
     {
       "name": "EMAIL",
-      "destination_address": "boreas.overcrowd752@passmail.net"
+      "allowed_sender_addresses": ["noreply@boreas.sylvaindenyse.me"]
     }
   ]
 }

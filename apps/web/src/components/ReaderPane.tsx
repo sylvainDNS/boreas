@@ -1,9 +1,10 @@
-import { articleBody, type MockArticle } from "../mock";
+import type { Article } from "../lib/articles";
+import { articleBody } from "../mock";
 import { Button } from "./ui/Button";
 
 /** Panneau lecteur : en-tête d'article, actions, contenu mis en forme.
  *  Le contenu réel (extrait à l'ingestion) arrive en tranche #7 ; ici, corps factice. */
-export function ReaderPane({ article }: { article: MockArticle }) {
+export function ReaderPane({ article }: { article: Article }) {
   return (
     <article className="mx-auto max-w-2xl px-6 py-8 sm:px-8 sm:py-10">
       <div className="mb-2 font-medium text-accent text-sm">

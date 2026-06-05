@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<rss version="2.0">
+  <channel>
+    <title>Tarifs € et nouveautés</title>
+    <item>
+      <title>L’offre du moment</title>
+      <link>https://example.com/win1252</link>
+      <guid>win1252-1</guid>
+      <description>Promotion €99 —derniers jours.</description>
+      <pubDate>Mon, 01 Jun 2026 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -1,8 +1,8 @@
-import type { MockArticle } from "../mock";
+import type { Article } from "../lib/articles";
 import { FeedChip } from "./ui/Badge";
 
 interface ArticleCardProps {
-  article: MockArticle;
+  article: Article;
   selected: boolean;
   onSelect: () => void;
 }

@@ -1,5 +1,9 @@
 // Données factices pour peupler le shell de #4 (revue de design).
 // Remplacées par les vraies données via l'API au fil des tranches #6+.
+// La vue « Tous les non-lus » (#6) consomme désormais l'API ; saved/feeds/
+// folders restent sur mock jusqu'à #9/#13.
+
+import type { Article } from "../lib/articles";
 
 export interface MockFeed {
   id: string;
@@ -13,17 +17,8 @@ export interface MockFolder {
   feeds: MockFeed[];
 }
 
-export interface MockArticle {
-  id: string;
-  /** Identifiant du Feed source (jointure stable, contrairement au nom). */
-  feedId: string;
-  feedName: string;
-  title: string;
-  excerpt: string;
-  time: string;
-  unread: boolean;
-  saved: boolean;
-}
+/** Alias : les données mock se conforment au type canonique `Article`. */
+export type MockArticle = Article;
 
 export const folders: MockFolder[] = [
   {

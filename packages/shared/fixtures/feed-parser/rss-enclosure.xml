@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Flux avec enclosure</title>
+    <item>
+      <title>Épisode de podcast</title>
+      <link>https://example.com/episode/1</link>
+      <guid>episode-1</guid>
+      <enclosure url="https://example.com/media/1.mp3" type="audio/mpeg" length="9876543"/>
+    </item>
+  </channel>
+</rss>

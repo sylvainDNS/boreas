@@ -2,7 +2,9 @@ import { getDb, settings } from "@boreas/shared";
 import { Hono } from "hono";
 import type { Env } from "./env";
 import { hasValidSession } from "./lib/session";
+import { articlesRoutes } from "./routes/articles";
 import { authRoutes } from "./routes/auth";
+import { feedsRoutes } from "./routes/feeds";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -25,6 +27,8 @@ app.use("/api/*", async (c, next) => {
 // --- Routes ---
 
 app.route("/api/auth", authRoutes);
+app.route("/api/feeds", feedsRoutes);
+app.route("/api/articles", articlesRoutes);
 
 /**
  * GET /api/health

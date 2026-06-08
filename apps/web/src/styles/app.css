@@ -19,6 +19,8 @@
   --color-accent: oklch(0.58 0.19 300);
   --color-accent-hover: oklch(0.53 0.19 300);
   --color-accent-fg: oklch(0.99 0 0);
+  /* État d'erreur (badge flux cassé, #11) — rouge perceptuellement lisible sur clair. */
+  --color-danger: oklch(0.55 0.2 25);
 
   --font-ui: "Figtree", ui-sans-serif, system-ui, sans-serif;
   --font-read: "Figtree", ui-sans-serif, system-ui, sans-serif;
@@ -39,6 +41,8 @@
   --color-accent: oklch(0.74 0.17 300);
   --color-accent-hover: oklch(0.79 0.17 300);
   --color-accent-fg: oklch(0.16 0.02 300);
+  /* Plus clair en sombre pour rester lisible sur fond foncé. */
+  --color-danger: oklch(0.7 0.18 25);
 
   --shadow-card: 0 1px 2px oklch(0 0 0 / 0.4), 0 6px 20px oklch(0 0 0 / 0.45);
   --shadow-pop: 0 8px 30px oklch(0 0 0 / 0.6);

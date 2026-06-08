@@ -1,5 +1,11 @@
-import { articles, feeds, getDb, ingestFeed } from "@boreas/shared";
-import { eq } from "drizzle-orm";
+import {
+  articles,
+  ERROR_THRESHOLD,
+  feeds,
+  getDb,
+  ingestFeed,
+} from "@boreas/shared";
+import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -13,6 +19,38 @@ const subscribeSchema = z.object({ url: z.string().url() });
  * partagé (`ingestFeed`, ADR 0002) que le consommateur de Queue du Cron (#10).
  */
 export const feedsRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * Liste des Feeds avec leur santé (#11) : la sidebar du SPA y lit le badge
+ * « en erreur ». `status` est **dérivé** de `consecutive_failures`
+ * (≥ `ERROR_THRESHOLD` = en erreur) plutôt que stocké, pour éviter une donnée
+ * redondante. Trié par titre (puis URL) pour un ordre stable.
+ */
+feedsRoutes.get("/", async (c) => {
+  const db = getDb(c.env.DB);
+  const rows = await db
+    .select({
+      id: feeds.id,
+      url: feeds.url,
+      title: feeds.title,
+      consecutiveFailures: feeds.consecutive_failures,
+      lastError: feeds.last_error,
+      lastCheckAt: feeds.last_check_at,
+    })
+    .from(feeds)
+    .orderBy(asc(feeds.title), asc(feeds.url));
+
+  return c.json({
+    feeds: rows.map((row) => ({
+      id: row.id,
+      url: row.url,
+      title: row.title,
+      status: row.consecutiveFailures >= ERROR_THRESHOLD ? "error" : "ok",
+      lastError: row.lastError,
+      lastCheckAt: row.lastCheckAt,
+    })),
+  });
+});
 
 /**
  * Abonnement par URL de flux directe : refuse les doublons, crée le Feed, puis

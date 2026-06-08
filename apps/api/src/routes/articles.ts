@@ -46,6 +46,10 @@ articlesRoutes.get("/", async (c) => {
         ? eq(articles.saved, true)
         : undefined;
 
+  // Restriction optionnelle à un Feed (#11, vue `/feeds/$feedId`).
+  const feedId = c.req.query("feedId");
+  const feedScope = feedId ? eq(articles.feed_id, feedId) : undefined;
+
   const db = getDb(c.env.DB);
   const rows = await db
     .select({
@@ -63,7 +67,7 @@ articlesRoutes.get("/", async (c) => {
     })
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(scope, keyset))
+    .where(and(scope, feedScope, keyset))
     .orderBy(desc(articles.fetched_at), desc(articles.id))
     .limit(PAGE_SIZE + 1);
 

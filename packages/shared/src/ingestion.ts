@@ -28,6 +28,25 @@ const EXTRACT_CONCURRENCY = 6;
 // Repli quand `settings.refresh_interval_min` est introuvable (base non seedée).
 const DEFAULT_REFRESH_INTERVAL_MIN = 30;
 
+/** Échecs consécutifs à partir desquels un Feed est considéré « en erreur » (#11). */
+export const ERROR_THRESHOLD = 3;
+
+// Plafond du backoff exponentiel : un Feed cassé n'est jamais re-vérifié plus
+// rarement qu'une fois par 24 h, pour récupérer vite quand il revient (#11).
+const MAX_BACKOFF_MIN = 24 * 60;
+
+// Garde-fous fetch (#11) : on borne le nombre de sauts de redirection, la durée
+// totale et la taille du corps pour qu'un Feed hostile/cassé ne bloque pas le
+// Worker (budget CPU/sous-requêtes) ni ne sature la mémoire.
+const MAX_REDIRECTS = 5;
+const FETCH_TIMEOUT_MS = 15_000;
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+// Codes de redirection traités comme permanents : la cible devient la nouvelle
+// URL du Feed (#11). 302/303/307 sont temporaires et ne modifient pas l'URL.
+const PERMANENT_REDIRECTS = new Set([301, 308]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
 const FETCH_HEADERS = {
   "user-agent": "Boreas/1.0 (+https://boreas.sylvaindenyse.me)",
   accept:
@@ -51,6 +70,26 @@ export interface IngestResult {
   /** Titre du flux après ingestion (évite un re-SELECT à l'appelant). */
   title: string | null;
   error?: string;
+  /** Échecs consécutifs après ce passage (0 sur succès) ; ≥ `ERROR_THRESHOLD` = en erreur (#11). */
+  consecutiveFailures: number;
+}
+
+/** Issue d'un fetch de Feed avec garde-fous (#11). */
+export interface FetchFeedResult {
+  response: Response;
+  /**
+   * Corps déjà lu (sous le budget timeout) pour une réponse 2xx, dans la limite
+   * de taille ; `null` pour un 304 (sans corps) ou un statut non-2xx (corps non
+   * lu). La lecture vit dans `fetchFeed` pour que le timeout couvre aussi le
+   * téléchargement, pas seulement les en-têtes.
+   */
+  bytes: Uint8Array | null;
+  /**
+   * URL finale atteinte uniquement via des redirections permanentes (301/308) :
+   * à persister comme nouvelle URL du Feed. `null` si pas de redirection, ou si
+   * la chaîne contenait une redirection temporaire (302/303/307).
+   */
+  permanentUrl: string | null;
 }
 
 // `sendBatch` est plafonné à 100 messages par requête (API Queues).
@@ -76,15 +115,106 @@ export async function enqueueFeedIds(
  *
  * Le jitter (fraction aléatoire de l'intervalle) étale les échéances des feeds
  * pour qu'ils ne soient pas tous dus au même tick de Cron (ADR 0002 « échéances
- * étalées »). Exporté pour test.
+ * étalées »).
+ *
+ * `consecutiveFailures` applique un **backoff exponentiel** (#11) : l'intervalle
+ * est multiplié par `2 ^ échecs`, plafonné à 24 h, pour ne pas marteler un Feed
+ * cassé. À 0 échec (succès), l'intervalle de base est repris tel quel.
+ * Exporté pour test.
  */
 export function computeNextCheckAt(
   intervalMinutes: number,
+  consecutiveFailures = 0,
   now: Date = new Date(),
 ): string {
-  const intervalMs = intervalMinutes * 60_000;
+  const backoffMin = Math.min(
+    intervalMinutes * 2 ** consecutiveFailures,
+    MAX_BACKOFF_MIN,
+  );
+  const intervalMs = backoffMin * 60_000;
   const jitterMs = Math.floor(Math.random() * intervalMs * 0.25);
   return sqlUtcNow(new Date(now.getTime() + intervalMs + jitterMs));
+}
+
+/**
+ * Fetch d'un Feed avec garde-fous (#11) : timeout 15 s, ≤ 5 redirections suivies
+ * manuellement, corps ≤ 10 Mo. Le suivi manuel (`redirect: "manual"`) est
+ * nécessaire pour distinguer une redirection **permanente** (301/308 → l'URL du
+ * Feed doit être mise à jour) d'une **temporaire** (302/303/307 → on suit sans
+ * réécrire l'URL), ce que `redirect: "follow"` masque.
+ *
+ * Le corps 2xx est **lu ici**, sous le même `AbortController` : sinon le timeout
+ * (annulé au retour) ne couvrirait que les en-têtes et un corps envoyé au
+ * compte-gouttes bloquerait le Worker indéfiniment.
+ *
+ * Lève sur cible de redirection non-http(s) (`bad_redirect`, garde anti-SSRF),
+ * dépassement du nombre de redirections (`too_many_redirects`), corps trop gros
+ * (`too_large`) ou timeout (`AbortError`, remonté par `fetch`). Exporté pour test.
+ */
+export async function fetchFeed(
+  url: string,
+  headers: Record<string, string>,
+): Promise<FetchFeedResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    let currentUrl = url;
+    // `null` dès qu'une redirection temporaire intervient : la chaîne n'est plus
+    // « purement permanente », donc on ne réécrit pas l'URL du Feed.
+    let permanentUrl: string | null = null;
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const response = await fetch(currentUrl, {
+        headers,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+
+      if (!REDIRECT_STATUSES.has(response.status)) {
+        const bytes = await readBodyWithinLimit(response);
+        return { response, bytes, permanentUrl };
+      }
+
+      const location = response.headers.get("location");
+      if (!location) {
+        // Redirection sans cible : on rend la réponse telle quelle (l'appelant
+        // la traitera comme un statut non-2xx → erreur).
+        return { response, bytes: null, permanentUrl };
+      }
+      const target = new URL(location, currentUrl);
+      // Garde anti-SSRF : on ne suit que http(s) (refuse file:, data:, etc.).
+      if (target.protocol !== "http:" && target.protocol !== "https:") {
+        throw new Error("bad_redirect");
+      }
+      currentUrl = target.toString();
+      permanentUrl = PERMANENT_REDIRECTS.has(response.status)
+        ? currentUrl
+        : null;
+    }
+
+    throw new Error("too_many_redirects");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Lit le corps d'une réponse 2xx en bornant la taille (`too_large`) ; renvoie
+ * `null` pour un statut non-2xx (corps non pertinent et potentiellement gros —
+ * page d'erreur). Vérifie d'abord le `Content-Length` annoncé (rejet en amont),
+ * puis la taille réelle après lecture (le header peut mentir/manquer).
+ */
+async function readBodyWithinLimit(
+  response: Response,
+): Promise<Uint8Array | null> {
+  if (!response.ok) return null;
+  const declared = response.headers.get("content-length");
+  if (declared && Number(declared) > MAX_BODY_BYTES) {
+    throw new Error("too_large");
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_BODY_BYTES) throw new Error("too_large");
+  return bytes;
 }
 
 /**
@@ -125,6 +255,7 @@ export async function ingestFeed(
       title: feeds.title,
       etag: feeds.etag,
       lastModified: feeds.last_modified,
+      consecutiveFailures: feeds.consecutive_failures,
     })
     .from(feeds)
     .where(eq(feeds.id, feedId))
@@ -137,6 +268,7 @@ export async function ingestFeed(
       itemCount: 0,
       title: null,
       error: "feed_not_found",
+      consecutiveFailures: 0,
     };
   }
 
@@ -150,22 +282,25 @@ export async function ingestFeed(
   let nextEtag = feed.etag;
   let nextLastModified = feed.lastModified;
   let nextTitle = feed.title;
+  // Cible d'une redirection permanente (301/308) : à persister comme nouvelle
+  // URL du Feed sur tout passage réussi, 304 inclus (#11).
+  let redirectedTo: string | null = null;
 
   try {
-    const response = await fetch(feed.url, {
-      headers: buildConditionalHeaders(feed.etag, feed.lastModified),
-      redirect: "follow",
-    });
+    const { response, bytes, permanentUrl } = await fetchFeed(
+      feed.url,
+      buildConditionalHeaders(feed.etag, feed.lastModified),
+    );
+    redirectedTo = permanentUrl;
 
     if (response.status === 304) {
       status = "not_modified";
-    } else if (!response.ok) {
+    } else if (!response.ok || !bytes) {
       status = "error";
       error = `http_${response.status}`;
     } else {
       nextEtag = response.headers.get("etag");
       nextLastModified = response.headers.get("last-modified");
-      const bytes = new Uint8Array(await response.arrayBuffer());
       const parsed = parseFeed(bytes, response.headers.get("content-type"));
       itemCount = parsed.items.length;
       // Le titre du flux peut évoluer ; on le garde à jour (ne l'écrase pas par null).
@@ -185,20 +320,74 @@ export async function ingestFeed(
     console.error("[ingestion] échec du fetch du flux", feedId, err);
   }
 
+  // Santé du Feed (#11) : un succès (updated/not_modified) remet le compteur à
+  // zéro et efface l'erreur ; un échec l'incrémente et pilote le backoff.
+  const succeeded = status !== "error";
+  const consecutiveFailures = succeeded ? 0 : feed.consecutiveFailures + 1;
+
   // Toujours avancer les échéances (même 304/erreur), et persister titre +
-  // validateurs de cache quand un 200 nous en a donné.
+  // validateurs de cache quand un 200 nous en a donné. Le backoff exponentiel
+  // espace les retries d'un Feed cassé (#11). L'URL n'est réécrite que sur un
+  // passage réussi (301→200 comme 301→304), jamais vers une cible en échec.
+  const nextUrl = await resolvePermanentUrl(
+    db,
+    feedId,
+    feed.url,
+    succeeded ? redirectedTo : null,
+  );
   await db
     .update(feeds)
     .set({
+      url: nextUrl,
       title: nextTitle,
       etag: nextEtag,
       last_modified: nextLastModified,
       last_check_at: sqlUtcNow(),
-      next_check_at: computeNextCheckAt(intervalMin),
+      next_check_at: computeNextCheckAt(intervalMin, consecutiveFailures),
+      consecutive_failures: consecutiveFailures,
+      last_error: succeeded ? null : (error ?? "fetch_failed"),
+      last_error_at: succeeded ? null : sqlUtcNow(),
     })
     .where(eq(feeds.id, feedId));
 
-  return { feedId, status, inserted, itemCount, title: nextTitle, error };
+  return {
+    feedId,
+    status,
+    inserted,
+    itemCount,
+    title: nextTitle,
+    error,
+    consecutiveFailures,
+  };
+}
+
+/**
+ * Décide de l'URL à persister après une redirection permanente (#11) : adopte
+ * `permanentUrl` sauf si un **autre** Feed l'occupe déjà (la colonne `url` est
+ * `unique`, l'update échouerait) — dans ce cas on conserve l'URL actuelle et on
+ * logge le conflit. Renvoie `currentUrl` si aucune redirection permanente.
+ */
+async function resolvePermanentUrl(
+  db: Db,
+  feedId: string,
+  currentUrl: string,
+  permanentUrl: string | null,
+): Promise<string> {
+  if (!permanentUrl || permanentUrl === currentUrl) return currentUrl;
+  const [clash] = await db
+    .select({ id: feeds.id })
+    .from(feeds)
+    .where(eq(feeds.url, permanentUrl))
+    .limit(1);
+  if (clash && clash.id !== feedId) {
+    console.warn(
+      "[ingestion] redirection 301 ignorée : URL déjà abonnée",
+      feedId,
+      permanentUrl,
+    );
+    return currentUrl;
+  }
+  return permanentUrl;
 }
 
 /**

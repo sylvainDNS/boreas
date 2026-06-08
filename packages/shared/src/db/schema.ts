@@ -63,6 +63,8 @@ export const authTokens = sqliteTable("auth_tokens", {
  * (CONTEXT.md). Un abonnement = une ligne ; l'unicité de `url` refuse les
  * doublons d'abonnement. Les colonnes de polling (etag, last_modified,
  * last_check_at, next_check_at) pilotent l'ingestion Cron+Queues (#10) ;
+ * les colonnes de santé (consecutive_failures, last_error, last_error_at)
+ * pilotent le backoff et le badge « en erreur » (#11) ;
  * `folder_id` sera ajouté par #13 (expand-only, ADR 0011).
  */
 export const feeds = sqliteTable("feeds", {
@@ -80,6 +82,16 @@ export const feeds = sqliteTable("feeds", {
   last_check_at: text("last_check_at"),
   /** Échéance de prochaine vérif, étalée par jitter (ADR 0002) ; null = dû immédiatement (#10). */
   next_check_at: text("next_check_at"),
+  /**
+   * Nombre d'échecs d'ingestion consécutifs (#11). Pilote le backoff
+   * exponentiel (×2 par échec, plafonné 24 h) et l'état « en erreur »
+   * (≥ 3 = `ERROR_THRESHOLD`). Remis à 0 au premier succès.
+   */
+  consecutive_failures: integer("consecutive_failures").notNull().default(0),
+  /** Code de la dernière erreur d'ingestion (`http_404`, `timeout`…), ou null si sain (#11). */
+  last_error: text("last_error"),
+  /** Horodatage ISO 8601 UTC du dernier échec, ou null si sain (#11). */
+  last_error_at: text("last_error_at"),
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),

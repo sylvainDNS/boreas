@@ -1,10 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { articleCountsQueryOptions } from "../lib/articles";
 import { AUTH_QUERY_KEY, logout } from "../lib/auth";
-import { folders } from "../mock";
+import { feedLabel, feedsQueryOptions } from "../lib/feeds";
 import { ThemeToggle } from "./ThemeToggle";
-import { CountBadge } from "./ui/Badge";
+import { CountBadge, ErrorBadge } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
 
 const itemBase =
@@ -15,9 +16,16 @@ const itemActive = "bg-surface-2 font-medium text-accent";
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  // Compteur global de non-lus exact (#8). Les compteurs par feed restent sur
-  // mock tant que la liste réelle des feeds n'existe pas (#13).
+  // Compteur global de non-lus exact (#8) + agrégat par feed pour les pastilles.
   const counts = useQuery(articleCountsQueryOptions());
+  // Liste réelle des feeds avec leur santé (#11). La réorganisation en folders
+  // reste #13 : on rend ici une liste plate.
+  const feeds = useQuery(feedsQueryOptions());
+  // Recalculée seulement quand les compteurs changent (pas à chaque re-render).
+  const unreadByFeed = useMemo(
+    () => new Map(counts.data?.byFeed.map((f) => [f.feedId, f.count])),
+    [counts.data],
+  );
 
   async function handleLogout() {
     await logout();
@@ -55,33 +63,35 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <span>Saved</span>
         </Link>
 
-        {folders.map((folder) => (
-          <div key={folder.id} className="pt-3">
+        <div className="pt-3">
+          <p className="px-3 pb-1 font-semibold text-[0.7rem] text-muted uppercase tracking-wide">
+            Flux
+          </p>
+          {feeds.data?.map((feed) => (
             <Link
-              to="/folders/$folderId"
-              params={{ folderId: folder.id }}
+              key={feed.id}
+              to="/feeds/$feedId"
+              params={{ feedId: feed.id }}
               onClick={onNavigate}
-              className="flex items-center px-3 pb-1 font-semibold text-[0.7rem] text-muted uppercase tracking-wide hover:text-text"
-              activeProps={{ className: "text-accent" }}
+              className={itemBase}
+              activeProps={{ className: itemActive }}
             >
-              {folder.name}
+              <span className="size-1.5 shrink-0 rounded-full bg-muted/40" />
+              <span className="truncate">{feedLabel(feed)}</span>
+              <span className="ml-auto flex items-center gap-1">
+                {feed.status === "error" && (
+                  <ErrorBadge detail={feed.lastError} />
+                )}
+                <CountBadge count={unreadByFeed.get(feed.id) ?? 0} />
+              </span>
             </Link>
-            {folder.feeds.map((feed) => (
-              <Link
-                key={feed.id}
-                to="/feeds/$feedId"
-                params={{ feedId: feed.id }}
-                onClick={onNavigate}
-                className={itemBase}
-                activeProps={{ className: itemActive }}
-              >
-                <span className="size-1.5 shrink-0 rounded-full bg-muted/40" />
-                <span className="truncate">{feed.name}</span>
-                <CountBadge count={feed.unread} className="ml-auto" />
-              </Link>
-            ))}
-          </div>
-        ))}
+          ))}
+          {feeds.data?.length === 0 && (
+            <p className="px-3 py-1 text-muted text-sm">
+              Aucun flux pour l'instant.
+            </p>
+          )}
+        </div>
       </nav>
 
       <div className="space-y-2 border-border border-t p-3">

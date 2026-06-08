@@ -94,21 +94,27 @@ export const ARTICLES_COUNTS_KEY = ["articles", "counts"] as const;
 /**
  * Intervalle de poll des listes/compteurs (#10). En complément du refetch au
  * focus (déjà actif, `main.tsx`), il fait remonter les articles ingérés en
- * arrière-plan par le Cron/Queue sans action de l'utilisateur.
+ * arrière-plan par le Cron/Queue sans action de l'utilisateur. Partagé avec la
+ * query des feeds (#11) pour un rythme de rafraîchissement unique.
  */
-const POLL_INTERVAL_MS = 60_000;
+export const POLL_INTERVAL_MS = 60_000;
 
 /**
  * Query infinie de la liste : pagination keyset par `cursor`, du plus récent au
- * plus ancien. La clé inclut le `filter` pour que « afficher / masquer les lus »
- * conserve deux caches distincts. Le scroll infini déclenche `fetchNextPage`.
+ * plus ancien. La clé inclut le `filter` (et le `feedId` éventuel) pour que
+ * « afficher / masquer les lus » et la vue par Feed (#11) conservent des caches
+ * distincts. Le scroll infini déclenche `fetchNextPage`.
  */
-export function listArticlesInfiniteQueryOptions(filter: ArticleFilter) {
+export function listArticlesInfiniteQueryOptions(
+  filter: ArticleFilter,
+  feedId?: string,
+) {
   return infiniteQueryOptions({
-    queryKey: [...ARTICLES_LIST_KEY, filter],
+    queryKey: [...ARTICLES_LIST_KEY, filter, feedId ?? null],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams({ filter });
+      if (feedId) params.set("feedId", feedId);
       if (pageParam) params.set("cursor", pageParam);
       return apiFetch<ArticlesPage>(`/articles?${params.toString()}`);
     },

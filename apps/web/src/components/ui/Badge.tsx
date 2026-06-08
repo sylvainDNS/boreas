@@ -18,6 +18,31 @@ export function CountBadge({
   );
 }
 
+/**
+ * Badge « flux en erreur » (#11) : pastille ⚠ en couleur danger, affichée quand
+ * un Feed a dépassé le seuil d'échecs consécutifs. `detail` (code d'erreur brut,
+ * ex. `http_404`) enrichit l'info-bulle.
+ */
+export function ErrorBadge({
+  detail,
+  className = "",
+}: {
+  detail?: string | null;
+  className?: string;
+}) {
+  const title = detail ? `Flux en erreur (${detail})` : "Flux en erreur";
+  return (
+    <span
+      role="img"
+      title={title}
+      aria-label={title}
+      className={`text-danger text-xs leading-none ${className}`}
+    >
+      <span aria-hidden>⚠</span>
+    </span>
+  );
+}
+
 /** Étiquette de source (nom du Feed). */
 export function FeedChip({ children }: { children: ReactNode }) {
   return (

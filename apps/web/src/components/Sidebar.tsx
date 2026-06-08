@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { articleCountsQueryOptions } from "../lib/articles";
 import { AUTH_QUERY_KEY, logout } from "../lib/auth";
 import { feedLabel, feedsQueryOptions } from "../lib/feeds";
+import { AddFeedDialog } from "./AddFeedDialog";
 import { ThemeToggle } from "./ThemeToggle";
 import { CountBadge, ErrorBadge } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
@@ -16,6 +17,7 @@ const itemActive = "bg-surface-2 font-medium text-accent";
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [addFeedOpen, setAddFeedOpen] = useState(false);
   // Compteur global de non-lus exact (#8) + agrégat par feed pour les pastilles.
   const counts = useQuery(articleCountsQueryOptions());
   // Liste réelle des feeds avec leur santé (#11). La réorganisation en folders
@@ -64,9 +66,20 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </Link>
 
         <div className="pt-3">
-          <p className="px-3 pb-1 font-semibold text-[0.7rem] text-muted uppercase tracking-wide">
-            Flux
-          </p>
+          <div className="flex items-center justify-between px-3 pb-1">
+            <p className="font-semibold text-[0.7rem] text-muted uppercase tracking-wide">
+              Flux
+            </p>
+            <button
+              type="button"
+              onClick={() => setAddFeedOpen(true)}
+              aria-label="Ajouter un flux"
+              title="Ajouter un flux"
+              className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              +
+            </button>
+          </div>
           {feeds.data?.map((feed) => (
             <Link
               key={feed.id}
@@ -87,12 +100,21 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             </Link>
           ))}
           {feeds.data?.length === 0 && (
-            <p className="px-3 py-1 text-muted text-sm">
-              Aucun flux pour l'instant.
-            </p>
+            <div className="px-3 py-1">
+              <p className="text-muted text-sm">Aucun flux pour l'instant.</p>
+              <button
+                type="button"
+                onClick={() => setAddFeedOpen(true)}
+                className="mt-1 text-accent text-sm underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                Ajouter un flux
+              </button>
+            </div>
           )}
         </div>
       </nav>
+
+      <AddFeedDialog open={addFeedOpen} onClose={() => setAddFeedOpen(false)} />
 
       <div className="space-y-2 border-border border-t p-3">
         <ThemeToggle />

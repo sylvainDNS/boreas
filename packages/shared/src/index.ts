@@ -8,11 +8,17 @@ export type {
   ParsedItem,
 } from "./feed-parser";
 export { parseFeed } from "./feed-parser";
-export type { IngestionMessage, IngestResult } from "./ingestion";
+export type {
+  FetchFeedResult,
+  IngestionMessage,
+  IngestResult,
+} from "./ingestion";
 export {
   buildConditionalHeaders,
   computeNextCheckAt,
+  ERROR_THRESHOLD,
   enqueueFeedIds,
+  fetchFeed,
   getDueFeedIds,
   ingestFeed,
 } from "./ingestion";

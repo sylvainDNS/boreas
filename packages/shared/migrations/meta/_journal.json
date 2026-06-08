@@ -50,6 +50,13 @@
       "when": 1780683516116,
       "tag": "0006_fantastic_liz_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1780932724077,
+      "tag": "0007_gorgeous_red_skull",
+      "breakpoints": true
     }
   ]
 }

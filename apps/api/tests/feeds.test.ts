@@ -44,6 +44,50 @@ const RSS = (items: string) => `<?xml version="1.0" encoding="UTF-8"?>
 const ITEM = (n: number) =>
   `<item><title>Article ${n}</title><link>https://src.example/${n}</link><guid>guid-${n}</guid><description>Résumé ${n}</description></item>`;
 
+/** Page HTML de site, avec les `<link rel="alternate">` injectés dans `<head>`. */
+const HTML = (links: string) =>
+  `<!doctype html><html><head><title>Site</title>${links}</head><body></body></html>`;
+
+const FEED_LINK = (
+  href: string,
+  type = "application/rss+xml",
+  title?: string,
+) =>
+  `<link rel="alternate" type="${type}" href="${href}"${title ? ` title="${title}"` : ""}>`;
+
+/**
+ * Route le `fetch` sortant par sous-chaîne d'URL : l'auto-découverte enchaîne
+ * un fetch sur l'URL de site puis (candidat unique) un fetch sur l'URL du flux,
+ * qui doivent renvoyer des corps différents. Première règle qui matche gagne ;
+ * 404 par défaut.
+ */
+function mockFetchByUrl(
+  routes: {
+    match: string;
+    status?: number;
+    body: string;
+    contentType?: string;
+  }[],
+): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : ((input as Request).url ?? String(input));
+      const route = routes.find((r) => url.includes(r.match));
+      if (!route) return new Response("not found", { status: 404 });
+      return new Response(route.body, {
+        status: route.status ?? 200,
+        headers: {
+          "content-type": route.contentType ?? "application/rss+xml",
+        },
+      });
+    }),
+  );
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -166,6 +210,209 @@ describe("POST /api/feeds — abonnement", () => {
       }),
     );
     expect(res.status).toBe(502);
+  });
+});
+
+describe("POST /api/feeds/discover — auto-découverte", () => {
+  const SITE = "https://site.example/blog";
+
+  it("refuse l'accès sans session (garde)", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/feeds/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: SITE }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("renvoie [] quand la page n'annonce aucun flux (0 candidat)", async () => {
+    mockFetchByUrl([{ match: SITE, body: HTML(""), contentType: "text/html" }]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/discover`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ candidates: [] });
+  });
+
+  it("renvoie l'unique flux annoncé (1 candidat), href relatif résolu", async () => {
+    mockFetchByUrl([
+      {
+        match: SITE,
+        body: HTML(FEED_LINK("/feed.xml", "application/rss+xml", "Flux")),
+        contentType: "text/html",
+      },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/discover`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      candidates: [
+        { url: "https://site.example/feed.xml", title: "Flux", type: "rss" },
+      ],
+    });
+  });
+
+  it("renvoie tous les flux annoncés (N candidats)", async () => {
+    mockFetchByUrl([
+      {
+        match: SITE,
+        body: HTML(
+          FEED_LINK("https://site.example/rss.xml") +
+            FEED_LINK("https://site.example/atom.xml", "application/atom+xml"),
+        ),
+        contentType: "text/html",
+      },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/discover`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { candidates: { type: string }[] };
+    expect(body.candidates).toHaveLength(2);
+    expect(body.candidates.map((c) => c.type)).toEqual(["rss", "atom"]);
+  });
+
+  it("remonte un échec de fetch de la page (502)", async () => {
+    mockFetchByUrl([
+      { match: SITE, status: 500, body: "boom", contentType: "text/plain" },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/discover`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+    expect(res.status).toBe(502);
+  });
+});
+
+describe("POST /api/feeds — abonnement par URL de site (#12)", () => {
+  const SITE = "https://site.example/blog";
+  const FEED = "https://site.example/feed.xml";
+
+  it("URL de site à 1 candidat : s'abonne au flux découvert (201)", async () => {
+    mockFetchByUrl([
+      // L'URL du flux doit matcher avant l'URL de site (toutes deux sous
+      // site.example) : on la place en premier.
+      { match: FEED, body: RSS(`${ITEM(1)}${ITEM(2)}`) },
+      { match: SITE, body: HTML(FEED_LINK(FEED)), contentType: "text/html" },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      feed: { url: string };
+      articleCount: number;
+    };
+    expect(body.feed.url).toBe(FEED);
+    expect(body.articleCount).toBe(2);
+  });
+
+  it("URL de site à N candidats : renvoie la liste sans abonner (200)", async () => {
+    mockFetchByUrl([
+      {
+        match: SITE,
+        body: HTML(
+          FEED_LINK("https://site.example/rss.xml") +
+            FEED_LINK("https://site.example/atom.xml", "application/atom+xml"),
+        ),
+        contentType: "text/html",
+      },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { candidates: unknown[] };
+    expect(body.candidates).toHaveLength(2);
+
+    // Aucun Feed ne doit avoir été créé (ni le site, ni un candidat).
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM feeds",
+    ).first<{ n: number }>();
+    expect(count?.n).toBe(0);
+  });
+
+  it("URL de site sans flux : 422 no_feed_found", async () => {
+    mockFetchByUrl([{ match: SITE, body: HTML(""), contentType: "text/html" }]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "no_feed_found" });
+  });
+
+  it("candidat unique déjà suivi : 409", async () => {
+    // Pré-abonnement au flux directement.
+    mockFetchByUrl([{ match: FEED, body: RSS(ITEM(1)) }]);
+    const first = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: FEED }),
+      }),
+    );
+    expect(first.status).toBe(201);
+
+    // L'URL de site renvoie ce même flux comme unique candidat → doublon.
+    mockFetchByUrl([
+      { match: FEED, body: RSS(ITEM(1)) },
+      { match: SITE, body: HTML(FEED_LINK(FEED)), contentType: "text/html" },
+    ]);
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE }),
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "already_subscribed" });
   });
 });
 

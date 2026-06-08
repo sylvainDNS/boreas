@@ -15,7 +15,8 @@
     "@boreas/content-extractor": "workspace:*",
     "@boreas/html-sanitizer": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fast-xml-parser": "5.8.0"
+    "fast-xml-parser": "5.8.0",
+    "linkedom": "0.18.12"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260527.1",

@@ -2,6 +2,8 @@ export type { ArticleItem } from "./article-identity";
 export { articleKey } from "./article-identity";
 export type { Db } from "./db/index";
 export { articles, authTokens, feeds, getDb, settings } from "./db/index";
+export type { DiscoveredFeed } from "./feed-discovery";
+export { discoverFeeds } from "./feed-discovery";
 export type {
   FeedEnclosure,
   ParsedFeed,

@@ -6,9 +6,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     concurrency:
       group: checks-${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -16,8 +20,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11.4.0
 
       - uses: actions/setup-node@v4
         with:
@@ -43,6 +45,7 @@ jobs:
     needs: checks
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     concurrency:
       group: deploy-prod
       cancel-in-progress: false
@@ -53,8 +56,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11.4.0
 
       - uses: actions/setup-node@v4
         with:

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "deploy": "wrangler pages deploy"
+    "deploy": "wrangler pages deploy --branch=main"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

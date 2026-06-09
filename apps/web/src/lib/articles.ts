@@ -101,20 +101,23 @@ export const POLL_INTERVAL_MS = 60_000;
 
 /**
  * Query infinie de la liste : pagination keyset par `cursor`, du plus récent au
- * plus ancien. La clé inclut le `filter` (et le `feedId` éventuel) pour que
- * « afficher / masquer les lus » et la vue par Feed (#11) conservent des caches
- * distincts. Le scroll infini déclenche `fetchNextPage`.
+ * plus ancien. La clé inclut le `filter`, le `feedId` (vue par Feed, #11) et le
+ * `folderId` (vue agrégée par Folder, #13) pour que chaque vue conserve un cache
+ * distinct. `feedId` et `folderId` sont mutuellement exclusifs en pratique. Le
+ * scroll infini déclenche `fetchNextPage`.
  */
 export function listArticlesInfiniteQueryOptions(
   filter: ArticleFilter,
   feedId?: string,
+  folderId?: string,
 ) {
   return infiniteQueryOptions({
-    queryKey: [...ARTICLES_LIST_KEY, filter, feedId ?? null],
+    queryKey: [...ARTICLES_LIST_KEY, filter, feedId ?? null, folderId ?? null],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams({ filter });
       if (feedId) params.set("feedId", feedId);
+      if (folderId) params.set("folderId", folderId);
       if (pageParam) params.set("cursor", pageParam);
       return apiFetch<ArticlesPage>(`/articles?${params.toString()}`);
     },
@@ -123,10 +126,12 @@ export function listArticlesInfiniteQueryOptions(
   });
 }
 
-/** Compteurs de non-lus exacts : total global + agrégat par Feed (#8). */
+/** Compteurs de non-lus exacts : total + agrégat par Feed (#8) et par Folder (#13). */
 export interface ArticleCounts {
   total: number;
   byFeed: { feedId: string; count: number }[];
+  /** Non-lus par Folder ; les Feeds non classés en sont absents. */
+  byFolder: { folderId: string; count: number }[];
 }
 
 export function articleCountsQueryOptions() {
@@ -271,10 +276,11 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
   };
 }
 
-/** Portée de « Tout marquer lu » (#8). Folder différé à #13. */
+/** Portée de « Tout marquer lu » : global, un Feed (#8) ou un Folder (#13). */
 export type MarkReadScope =
   | { scope: "global" }
-  | { scope: "feed"; feedId: string };
+  | { scope: "feed"; feedId: string }
+  | { scope: "folder"; folderId: string };
 
 /**
  * Options de mutation pour la bascule manuelle Read↔non-lu (`PATCH /articles/:id`).

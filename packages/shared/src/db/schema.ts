@@ -65,7 +65,7 @@ export const authTokens = sqliteTable("auth_tokens", {
  * last_check_at, next_check_at) pilotent l'ingestion Cron+Queues (#10) ;
  * les colonnes de santé (consecutive_failures, last_error, last_error_at)
  * pilotent le backoff et le badge « en erreur » (#11) ;
- * `folder_id` sera ajouté par #13 (expand-only, ADR 0011).
+ * `folder_id` rattache le Feed à un Folder (≤ 1, nullable) — assignation #13.
  */
 export const feeds = sqliteTable("feeds", {
   /** UUID applicatif (crypto.randomUUID), stable et indépendant de l'ordre d'insertion. */
@@ -92,6 +92,13 @@ export const feeds = sqliteTable("feeds", {
   last_error: text("last_error"),
   /** Horodatage ISO 8601 UTC du dernier échec, ou null si sain (#11). */
   last_error_at: text("last_error_at"),
+  /**
+   * Folder de rattachement (≤ 1 par Feed, nullable = non classé) (#13). FK en
+   * `ON DELETE no action` (défaut drizzle) : supprimer un Folder exige de
+   * désassigner ses Feeds d'abord (cf. `DELETE /folders/:id`). Référence
+   * paresseuse (`() => folders.id`) car `folders` est déclaré plus bas.
+   */
+  folder_id: text("folder_id").references(() => folders.id),
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
@@ -151,4 +158,18 @@ export const articles = sqliteTable(
   ],
 );
 
-// Tables à venir (folders) — ajoutées au fil des issues.
+/**
+ * Folder : regroupement de Feeds (jamais d'Articles), hiérarchie plate, un seul
+ * niveau (CONTEXT.md). Un Feed appartient à au plus un Folder via `feeds.folder_id` ;
+ * ouvrir un Folder agrège les Articles de tous ses Feeds (#13). Pas de contrainte
+ * d'unicité sur `name` : deux Folders peuvent porter le même nom.
+ */
+export const folders = sqliteTable("folders", {
+  /** UUID applicatif (crypto.randomUUID). */
+  id: text("id").primaryKey(),
+  /** Nom affiché du Folder (libre, non vide côté API). */
+  name: text("name").notNull(),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+});

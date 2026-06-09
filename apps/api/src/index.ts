@@ -5,6 +5,7 @@ import { hasValidSession } from "./lib/session";
 import { articlesRoutes } from "./routes/articles";
 import { authRoutes } from "./routes/auth";
 import { feedsRoutes } from "./routes/feeds";
+import { foldersRoutes } from "./routes/folders";
 import { refreshRoutes } from "./routes/refresh";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -29,6 +30,7 @@ app.use("/api/*", async (c, next) => {
 
 app.route("/api/auth", authRoutes);
 app.route("/api/feeds", feedsRoutes);
+app.route("/api/folders", foldersRoutes);
 app.route("/api/articles", articlesRoutes);
 app.route("/api/refresh", refreshRoutes);
 

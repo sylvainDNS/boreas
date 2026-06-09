@@ -7,6 +7,7 @@ import {
   ERROR_THRESHOLD,
   feeds,
   fetchFeed,
+  folders,
   getDb,
   ingestFeed,
 } from "@boreas/shared";
@@ -161,6 +162,7 @@ feedsRoutes.get("/", async (c) => {
       consecutiveFailures: feeds.consecutive_failures,
       lastError: feeds.last_error,
       lastCheckAt: feeds.last_check_at,
+      folderId: feeds.folder_id,
     })
     .from(feeds)
     .orderBy(asc(feeds.title), asc(feeds.url));
@@ -173,6 +175,8 @@ feedsRoutes.get("/", async (c) => {
       status: row.consecutiveFailures >= ERROR_THRESHOLD ? "error" : "ok",
       lastError: row.lastError,
       lastCheckAt: row.lastCheckAt,
+      // Folder de rattachement (null = non classé). La sidebar (#13) regroupe.
+      folderId: row.folderId,
     })),
   });
 });
@@ -285,4 +289,63 @@ feedsRoutes.post("/:id/refresh", async (c) => {
 
   const result = await ingestFeed(id, db, c.env.BUCKET, c.env.HMAC_SECRET);
   return c.json({ inserted: result.inserted, status: result.status });
+});
+
+// Renommage et/ou déplacement de Feed : `title` non vide pour renommer ;
+// `folderId` (uuid) pour assigner un Folder, `null` pour désassigner. Au moins
+// un champ requis (`.refine`) — sinon le PATCH n'aurait rien à faire.
+const updateFeedSchema = z
+  .object({
+    title: z.string().trim().min(1).optional(),
+    folderId: z.string().min(1).nullable().optional(),
+  })
+  .refine((d) => d.title !== undefined || d.folderId !== undefined, {
+    message: "no_field",
+  });
+
+/**
+ * Renomme un Feed et/ou le déplace entre Folders (US 12, #13). `folderId: null`
+ * désassigne (le Feed repasse « non classé »). Un `folderId` fourni doit
+ * désigner un Folder existant (sinon 422 `folder_not_found`) — la FK D1
+ * l'imposerait aussi, mais on renvoie une erreur métier plutôt qu'une 500.
+ * La réponse n'écho que les champs effectivement modifiés.
+ */
+feedsRoutes.patch("/:id", async (c) => {
+  const parsed = updateFeedSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
+  if (!parsed.success) {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+
+  // Valide la cible du déplacement avant d'écrire (folderId non-null seulement).
+  if (parsed.data.folderId) {
+    const [folder] = await db
+      .select({ id: folders.id })
+      .from(folders)
+      .where(eq(folders.id, parsed.data.folderId))
+      .limit(1);
+    if (!folder) {
+      return c.json({ error: "folder_not_found" }, 422);
+    }
+  }
+
+  // `parsed.data` ne porte que les champs fournis : on mappe `folderId` (API)
+  // vers la colonne `folder_id` et on n'écrit que ce qui est présent.
+  const set: { title?: string; folder_id?: string | null } = {};
+  if (parsed.data.title !== undefined) set.title = parsed.data.title;
+  if (parsed.data.folderId !== undefined) set.folder_id = parsed.data.folderId;
+
+  const updated = await db
+    .update(feeds)
+    .set(set)
+    .where(eq(feeds.id, id))
+    .returning({ id: feeds.id });
+
+  if (updated.length === 0) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  return c.json({ id, ...parsed.data });
 });

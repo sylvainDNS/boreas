@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes } from "react";
 
-type Variant = "primary" | "outline" | "ghost";
+type Variant = "primary" | "outline" | "ghost" | "danger";
 
 const BASE =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-card px-4 font-medium text-sm transition-colors focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-50";
@@ -9,6 +9,9 @@ const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent text-accent-fg hover:bg-accent-hover",
   outline: "border border-border bg-surface text-text hover:bg-surface-2",
   ghost: "text-text hover:bg-surface-2",
+  // Action destructive (suppression). Variante dédiée plutôt que des utilitaires
+  // `bg-danger` superposés à `primary` (conflit d'ordre des classes Tailwind).
+  danger: "bg-danger text-accent-fg hover:bg-danger/90",
 };
 
 /**

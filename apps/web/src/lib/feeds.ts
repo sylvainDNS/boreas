@@ -18,6 +18,8 @@ export interface Feed {
   status: "ok" | "error";
   lastError: string | null;
   lastCheckAt: string | null;
+  /** Folder de rattachement (≤ 1), ou `null` si non classé (#13). */
+  folderId: string | null;
 }
 
 interface FeedsResponse {
@@ -109,6 +111,36 @@ export function subscribeFeedMutationOptions(queryClient: QueryClient) {
     mutationFn: (url: string) => submitFeedUrl(url),
     onSuccess: (outcome: SubscribeOutcome) => {
       if (outcome.kind !== "subscribed") return;
+      void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+    },
+  };
+}
+
+/** Champs modifiables d'un Feed (#13) : titre et/ou rattachement à un Folder. */
+export interface UpdateFeedInput {
+  id: string;
+  /** Nouveau titre (renommage), ou laissé absent pour ne pas y toucher. */
+  title?: string;
+  /** Folder cible : `null` désassigne ; absent = inchangé. */
+  folderId?: string | null;
+}
+
+/**
+ * Mutation de renommage et/ou déplacement d'un Feed (`PATCH /api/feeds/:id`, US
+ * 12 / #13). Invalide la liste des feeds (regroupement sidebar + libellé) ainsi
+ * que les listes et compteurs d'articles : un déplacement change l'appartenance
+ * aux vues Folder, un renommage le `feedName` affiché sur chaque carte.
+ */
+export function updateFeedMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: ({ id, ...patch }: UpdateFeedInput) =>
+      apiFetch<{ id: string }>(`/feeds/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }),
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });

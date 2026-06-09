@@ -1,5 +1,5 @@
 import { articles, feeds, getDb } from "@boreas/shared";
-import { and, count, desc, eq, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -50,6 +50,11 @@ articlesRoutes.get("/", async (c) => {
   const feedId = c.req.query("feedId");
   const feedScope = feedId ? eq(articles.feed_id, feedId) : undefined;
 
+  // Restriction optionnelle à un Folder (#13, vue `/folders/$folderId`) : agrège
+  // les articles de tous les Feeds rattachés, via le `innerJoin(feeds)` ci-dessous.
+  const folderId = c.req.query("folderId");
+  const folderScope = folderId ? eq(feeds.folder_id, folderId) : undefined;
+
   const db = getDb(c.env.DB);
   const rows = await db
     .select({
@@ -67,7 +72,7 @@ articlesRoutes.get("/", async (c) => {
     })
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(scope, feedScope, keyset))
+    .where(and(scope, feedScope, folderScope, keyset))
     .orderBy(desc(articles.fetched_at), desc(articles.id))
     .limit(PAGE_SIZE + 1);
 
@@ -96,22 +101,34 @@ articlesRoutes.get("/", async (c) => {
 });
 
 /**
- * Compteurs de non-lus exacts : total global + agrégat par Feed (#8). Le SPA y
- * lit le badge « Tous les non-lus » de la sidebar (exact, indépendamment des
- * pages chargées). Les feeds sans non-lu n'apparaissent pas dans `byFeed`.
+ * Compteurs de non-lus exacts : total global + agrégat par Feed (#8) et par
+ * Folder (#13). Le SPA y lit le badge « Tous les non-lus » et les pastilles de
+ * la sidebar (exact, indépendamment des pages chargées). Les Feeds/Folders sans
+ * non-lu n'apparaissent pas dans `byFeed`/`byFolder`.
+ *
+ * `byFolder` joint `feeds` pour remonter `folder_id` ; les articles de Feeds non
+ * classés (`folder_id` null) en sont exclus. Le `total` se déduit de `byFeed`
+ * (toute ligne d'article a un Feed), pas de `byFolder` qui omet les non classés.
  *
  * Déclaré **avant** `GET /:id` pour que `/counts` ne soit pas capturé comme un id.
  */
 articlesRoutes.get("/counts", async (c) => {
   const db = getDb(c.env.DB);
-  const rows = await db
+  const byFeed = await db
     .select({ feedId: articles.feed_id, count: count() })
     .from(articles)
     .where(eq(articles.read, false))
     .groupBy(articles.feed_id);
 
-  const total = rows.reduce((sum, row) => sum + row.count, 0);
-  return c.json({ total, byFeed: rows });
+  const byFolder = await db
+    .select({ folderId: feeds.folder_id, count: count() })
+    .from(articles)
+    .innerJoin(feeds, eq(articles.feed_id, feeds.id))
+    .where(and(eq(articles.read, false), isNotNull(feeds.folder_id)))
+    .groupBy(feeds.folder_id);
+
+  const total = byFeed.reduce((sum, row) => sum + row.count, 0);
+  return c.json({ total, byFeed, byFolder });
 });
 
 const patchSchema = z
@@ -151,12 +168,14 @@ articlesRoutes.patch("/:id", async (c) => {
 const markReadSchema = z.discriminatedUnion("scope", [
   z.object({ scope: z.literal("global") }),
   z.object({ scope: z.literal("feed"), feedId: z.string().min(1) }),
+  z.object({ scope: z.literal("folder"), folderId: z.string().min(1) }),
 ]);
 
 /**
- * « Tout marquer lu » (#8) au niveau global ou d'un Feed. La portée Folder est
- * différée à #13 (pas de table folders). On ne touche que les non-lus pour que
- * `updated` reflète le nombre réel d'articles basculés.
+ * « Tout marquer lu » (#8) au niveau global, d'un Feed ou d'un Folder (#13). La
+ * portée Folder cible les articles des Feeds rattachés via un sous-`select` sur
+ * `feeds.folder_id`. On ne touche que les non-lus pour que `updated` reflète le
+ * nombre réel d'articles basculés.
  */
 articlesRoutes.post("/mark-read", async (c) => {
   const parsed = markReadSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -168,7 +187,15 @@ articlesRoutes.post("/mark-read", async (c) => {
   const scopeFilter =
     parsed.data.scope === "feed"
       ? eq(articles.feed_id, parsed.data.feedId)
-      : undefined;
+      : parsed.data.scope === "folder"
+        ? inArray(
+            articles.feed_id,
+            db
+              .select({ id: feeds.id })
+              .from(feeds)
+              .where(eq(feeds.folder_id, parsed.data.folderId)),
+          )
+        : undefined;
 
   const updated = await db
     .update(articles)

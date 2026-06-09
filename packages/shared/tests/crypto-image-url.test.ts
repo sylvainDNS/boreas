@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { signImageUrl, verifyImageUrl } from "../src/crypto/image-url";
+import {
+  imageCacheKey,
+  signImageUrl,
+  verifyImageUrl,
+} from "../src/crypto/image-url";
 
 const SECRET = "test-secret";
 
@@ -40,5 +44,20 @@ describe("signImageUrl / verifyImageUrl", () => {
         params.get("sig") ?? "",
       ),
     ).toBeNull();
+  });
+});
+
+describe("imageCacheKey", () => {
+  it("préfixe par images/ et reste déterministe pour une même URL", () => {
+    const src = "https://src.example/photos/a.jpg?w=800";
+    const key = imageCacheKey(src);
+    expect(key.startsWith("images/")).toBe(true);
+    expect(imageCacheKey(src)).toBe(key);
+  });
+
+  it("produit des clés distinctes pour des URLs distinctes", () => {
+    expect(imageCacheKey("https://src.example/a.jpg")).not.toBe(
+      imageCacheKey("https://src.example/b.jpg"),
+    );
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { hmacBase64url, signaturesMatch } from "./hmac";
 
 /**
@@ -35,4 +36,14 @@ export function verifyImageUrl(
   } catch {
     return null;
   }
+}
+
+/**
+ * Clé R2 d'une image proxifiée (ADR 0009) : content-addressed par l'URL source,
+ * `images/<sha256hex(srcUrl)>`. Deux articles citant la même image partagent
+ * donc le même objet cache. Déterministe — utilisée à la fois pour lire le cache
+ * et pour y écrire (#16).
+ */
+export function imageCacheKey(srcUrl: string): string {
+  return `images/${createHash("sha256").update(srcUrl).digest("hex")}`;
 }

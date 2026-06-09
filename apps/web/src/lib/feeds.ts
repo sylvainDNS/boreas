@@ -111,9 +111,7 @@ export function subscribeFeedMutationOptions(queryClient: QueryClient) {
     mutationFn: (url: string) => submitFeedUrl(url),
     onSuccess: (outcome: SubscribeOutcome) => {
       if (outcome.kind !== "subscribed") return;
-      void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
-      void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
-      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+      invalidateAfterFeedLifecycle(queryClient);
     },
   };
 }
@@ -140,17 +138,16 @@ export function updateFeedMutationOptions(queryClient: QueryClient) {
         method: "PATCH",
         body: JSON.stringify(patch),
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
-      void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
-      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
-    },
+    onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
   };
 }
 
-/** Invalide liste des feeds + listes/compteurs d'articles après un changement
- * de cycle de vie (#14) : le feed disparaît de la sidebar et ses articles des
- * vues non-lus. */
+/**
+ * Invalide la liste des feeds + listes/compteurs d'articles. Partagé par toutes
+ * les mutations qui font apparaître ou disparaître un feed et/ou ses articles :
+ * abonnement (#12), renommage/déplacement (#13), désabonnement/suppression (#14).
+ * Centralisé pour qu'une clé dépendant d'un feed ajoutée ici le soit partout.
+ */
 function invalidateAfterFeedLifecycle(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
   void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });

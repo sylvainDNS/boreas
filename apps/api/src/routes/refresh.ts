@@ -1,4 +1,5 @@
 import { enqueueFeedIds, feeds, getDb } from "@boreas/shared";
+import { isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
 
@@ -13,7 +14,12 @@ export const refreshRoutes = new Hono<{ Bindings: Env }>();
 
 refreshRoutes.post("/", async (c) => {
   const db = getDb(c.env.DB);
-  const rows = await db.select({ id: feeds.id }).from(feeds);
+  // Les Feeds désabonnés (#14) sont exclus : leur polling est arrêté, on ne les
+  // ré-ingère pas (sinon le refresh global ressusciterait leurs Articles purgés).
+  const rows = await db
+    .select({ id: feeds.id })
+    .from(feeds)
+    .where(isNull(feeds.unsubscribed_at));
   await enqueueFeedIds(
     c.env.INGESTION_QUEUE,
     rows.map((r) => r.id),

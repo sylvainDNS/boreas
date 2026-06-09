@@ -131,26 +131,28 @@ articlesRoutes.get("/", async (c) => {
 articlesRoutes.get("/counts", async (c) => {
   const db = getDb(c.env.DB);
   // Les Feeds désabonnés (#14) sont exclus des compteurs (jointure + filtre),
-  // pour rester cohérents avec la sidebar et la river non-lus.
-  const byFeed = await db
-    .select({ feedId: articles.feed_id, count: count() })
-    .from(articles)
-    .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(eq(articles.read, false), isNull(feeds.unsubscribed_at)))
-    .groupBy(articles.feed_id);
-
-  const byFolder = await db
-    .select({ folderId: feeds.folder_id, count: count() })
-    .from(articles)
-    .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(
-      and(
-        eq(articles.read, false),
-        isNotNull(feeds.folder_id),
-        isNull(feeds.unsubscribed_at),
-      ),
-    )
-    .groupBy(feeds.folder_id);
+  // pour rester cohérents avec la sidebar et la river non-lus. Les deux agrégats
+  // sont indépendants : on les lance en parallèle (endpoint chaud, polling).
+  const [byFeed, byFolder] = await Promise.all([
+    db
+      .select({ feedId: articles.feed_id, count: count() })
+      .from(articles)
+      .innerJoin(feeds, eq(articles.feed_id, feeds.id))
+      .where(and(eq(articles.read, false), isNull(feeds.unsubscribed_at)))
+      .groupBy(articles.feed_id),
+    db
+      .select({ folderId: feeds.folder_id, count: count() })
+      .from(articles)
+      .innerJoin(feeds, eq(articles.feed_id, feeds.id))
+      .where(
+        and(
+          eq(articles.read, false),
+          isNotNull(feeds.folder_id),
+          isNull(feeds.unsubscribed_at),
+        ),
+      )
+      .groupBy(feeds.folder_id),
+  ]);
 
   const total = byFeed.reduce((sum, row) => sum + row.count, 0);
   return c.json({ total, byFeed, byFolder });

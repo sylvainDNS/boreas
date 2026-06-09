@@ -692,5 +692,92 @@ describe("Cycle de vie d'un Feed (#14) — unsubscribe & delete", () => {
       ).json()) as { feeds: { id: string }[] };
       expect(list.feeds.map((f) => f.id)).toContain(feedId);
     });
+
+    it("re-backfille même si le flux a un ETag (etag/last_modified réinitialisés)", async () => {
+      const url = "https://src.example/etag.xml";
+
+      // Mock conditionnel : renvoie 304 si la requête porte un If-None-Match,
+      // sinon 200 + ETag. Reproduit un serveur respectant le conditional GET.
+      function mockConditionalFetch(): void {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const headers = new Headers(
+              init?.headers as Record<string, string> | undefined,
+            );
+            if (headers.get("if-none-match")) {
+              return new Response(null, { status: 304 });
+            }
+            return new Response(RSS(`${ITEM(1)}${ITEM(2)}`), {
+              status: 200,
+              headers: {
+                "content-type": "application/rss+xml",
+                etag: '"v1"',
+              },
+            });
+          }),
+        );
+      }
+
+      mockConditionalFetch();
+      const sub = await SELF.fetch(
+        `${ORIGIN}/api/feeds`,
+        authed({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url }),
+        }),
+      );
+      expect(sub.status).toBe(201);
+      const feedId = ((await sub.json()) as { feed: { id: string } }).feed.id;
+
+      await SELF.fetch(
+        `${ORIGIN}/api/feeds/${feedId}/unsubscribe`,
+        authed({ method: "POST" }),
+      );
+
+      // Réabonnement : l'ETag d'avant doit être effacé, sinon le GET conditionnel
+      // renverrait 304 et ne re-backfillerait rien (articles non-Saved purgés).
+      mockConditionalFetch();
+      const re = await SELF.fetch(
+        `${ORIGIN}/api/feeds`,
+        authed({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url }),
+        }),
+      );
+      expect(re.status).toBe(201);
+      expect(((await re.json()) as { articleCount: number }).articleCount).toBe(
+        2,
+      );
+      const count = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM articles WHERE feed_id = ?",
+      )
+        .bind(feedId)
+        .first<{ n: number }>();
+      expect(count?.n).toBe(2);
+    });
+  });
+
+  describe("POST /api/feeds/:id/refresh — feed désabonné (#14)", () => {
+    it("renvoie 404 et ne ré-ingère pas un feed désabonné", async () => {
+      await env.DB.prepare(
+        "INSERT INTO feeds (id, url, title, unsubscribed_at) VALUES (?, ?, ?, ?)",
+      )
+        .bind(
+          "f-off",
+          "https://src.example/off.xml",
+          "Désabonné",
+          "2026-06-01T00:00:00Z",
+        )
+        .run();
+
+      const res = await SELF.fetch(
+        `${ORIGIN}/api/feeds/f-off/refresh`,
+        authed({ method: "POST" }),
+      );
+      expect(res.status).toBe(404);
+    });
   });
 });

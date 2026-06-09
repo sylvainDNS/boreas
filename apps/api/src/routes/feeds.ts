@@ -106,6 +106,11 @@ async function subscribeToFeedUrl(
  * Contrairement à l'abonnement initial, **aucun rollback** si l'ingestion
  * échoue : la ligne Feed et ses Articles Saved préexistent et doivent survivre —
  * un fetch KO laissera simplement le Feed réactivé en statut « en erreur ».
+ *
+ * On efface aussi `etag`/`last_modified` : sans cela, `ingestFeed` rejouerait le
+ * GET conditionnel avec les validateurs d'avant le désabonnement, l'origine
+ * répondrait 304 et le re-backfill n'insérerait rien (alors que les Articles
+ * non-Saved ont justement été purgés). On force donc un fetch complet.
  */
 async function reactivateFeed(
   feedId: string,
@@ -118,6 +123,8 @@ async function reactivateFeed(
     .set({
       unsubscribed_at: null,
       next_check_at: null,
+      etag: null,
+      last_modified: null,
       consecutive_failures: 0,
       last_error: null,
       last_error_at: null,
@@ -325,10 +332,12 @@ feedsRoutes.post("/:id/refresh", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
+  // Un Feed désabonné (#14) est masqué et son polling arrêté : on refuse le
+  // refresh manuel (404) plutôt que de le ré-ingérer et ressusciter ses articles.
   const [feed] = await db
     .select({ id: feeds.id })
     .from(feeds)
-    .where(eq(feeds.id, id))
+    .where(and(eq(feeds.id, id), isNull(feeds.unsubscribed_at)))
     .limit(1);
   if (!feed) {
     return c.json({ error: "not_found" }, 404);
@@ -437,17 +446,18 @@ feedsRoutes.delete("/:id", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
-  const [feed] = await db
-    .select({ id: feeds.id })
-    .from(feeds)
+  // On purge d'abord les Articles + objets R2 (FK `articles.feed_id` en ON DELETE
+  // no action), puis on supprime la ligne Feed en signalant son existence via
+  // `returning()` : pas de SELECT préalable ni de fenêtre TOCTOU. Si le Feed
+  // n'existe pas, la purge est un no-op et le delete renvoie une liste vide → 404.
+  await deleteArticlesAndContent(db, c.env.BUCKET, eq(articles.feed_id, id));
+  const deleted = await db
+    .delete(feeds)
     .where(eq(feeds.id, id))
-    .limit(1);
-  if (!feed) {
+    .returning({ id: feeds.id });
+  if (deleted.length === 0) {
     return c.json({ error: "not_found" }, 404);
   }
-
-  await deleteArticlesAndContent(db, c.env.BUCKET, eq(articles.feed_id, id));
-  await db.delete(feeds).where(eq(feeds.id, id));
 
   return c.json({ ok: true });
 });

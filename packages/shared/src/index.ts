@@ -32,4 +32,9 @@ export {
   getDueFeedIds,
   ingestFeed,
 } from "./ingestion";
+export {
+  purgeExpiredArticles,
+  runRetention,
+  sweepOrphanContent,
+} from "./retention";
 export { sqlUtcNow } from "./timestamp";

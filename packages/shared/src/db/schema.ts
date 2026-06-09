@@ -99,6 +99,15 @@ export const feeds = sqliteTable("feeds", {
    * paresseuse (`() => folders.id`) car `folders` est déclaré plus bas.
    */
   folder_id: text("folder_id").references(() => folders.id),
+  /**
+   * Désabonnement (#14, ADR 0010) : `null` = Feed actif ; horodatage ISO 8601
+   * UTC = Feed désabonné (masqué). Marqueur unique qui sort le Feed de la
+   * sélection Cron, de la sidebar et des vues non-lus/compteurs, tout en gardant
+   * la ligne pour préserver le contexte de ses Articles Saved (conservés). Remis
+   * à `null` au ré-abonnement (réactivation). À ne pas confondre avec le statut
+   * santé `ok`/`error`, lui dérivé de `consecutive_failures`.
+   */
+  unsubscribed_at: text("unsubscribed_at"),
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),

@@ -1,5 +1,15 @@
 import { articles, feeds, getDb } from "@boreas/shared";
-import { and, count, desc, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+} from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -55,6 +65,12 @@ articlesRoutes.get("/", async (c) => {
   const folderId = c.req.query("folderId");
   const folderScope = folderId ? eq(feeds.folder_id, folderId) : undefined;
 
+  // Les Articles d'un Feed désabonné (#14) sont exclus de la river non-lus et de
+  // « tout afficher », cohérent avec la sidebar. La vue Saved, elle, les garde :
+  // un Saved doit rester accessible même après désabonnement du Feed.
+  const activeFeedScope =
+    filter === "saved" ? undefined : isNull(feeds.unsubscribed_at);
+
   const db = getDb(c.env.DB);
   const rows = await db
     .select({
@@ -72,7 +88,7 @@ articlesRoutes.get("/", async (c) => {
     })
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(scope, feedScope, folderScope, keyset))
+    .where(and(scope, feedScope, folderScope, keyset, activeFeedScope))
     .orderBy(desc(articles.fetched_at), desc(articles.id))
     .limit(PAGE_SIZE + 1);
 
@@ -114,17 +130,26 @@ articlesRoutes.get("/", async (c) => {
  */
 articlesRoutes.get("/counts", async (c) => {
   const db = getDb(c.env.DB);
+  // Les Feeds désabonnés (#14) sont exclus des compteurs (jointure + filtre),
+  // pour rester cohérents avec la sidebar et la river non-lus.
   const byFeed = await db
     .select({ feedId: articles.feed_id, count: count() })
     .from(articles)
-    .where(eq(articles.read, false))
+    .innerJoin(feeds, eq(articles.feed_id, feeds.id))
+    .where(and(eq(articles.read, false), isNull(feeds.unsubscribed_at)))
     .groupBy(articles.feed_id);
 
   const byFolder = await db
     .select({ folderId: feeds.folder_id, count: count() })
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
-    .where(and(eq(articles.read, false), isNotNull(feeds.folder_id)))
+    .where(
+      and(
+        eq(articles.read, false),
+        isNotNull(feeds.folder_id),
+        isNull(feeds.unsubscribed_at),
+      ),
+    )
     .groupBy(feeds.folder_id);
 
   const total = byFeed.reduce((sum, row) => sum + row.count, 0);

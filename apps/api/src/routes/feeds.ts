@@ -3,6 +3,7 @@ import {
   buildConditionalHeaders,
   type Db,
   type DiscoveredFeed,
+  deleteArticlesAndContent,
   discoverFeeds,
   ERROR_THRESHOLD,
   feeds,
@@ -10,8 +11,9 @@ import {
   folders,
   getDb,
   ingestFeed,
+  sqlUtcNow,
 } from "@boreas/shared";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -45,14 +47,19 @@ async function subscribeToFeedUrl(
   db: Db,
   env: Env,
 ): Promise<SubscribeOutcome> {
-  // Dédup d'abonnement : un Feed déjà suivi est refusé.
+  // Dédup d'abonnement. Un Feed déjà **actif** est refusé (doublon). Un Feed
+  // **désabonné** (#14, ADR 0010) est réactivé plutôt que refusé : se réabonner
+  // est réversible, on relance son polling en conservant ses Articles Saved.
   const [existing] = await db
-    .select({ id: feeds.id })
+    .select({ id: feeds.id, unsubscribedAt: feeds.unsubscribed_at })
     .from(feeds)
     .where(eq(feeds.url, url))
     .limit(1);
   if (existing) {
-    return { ok: false, error: "already_subscribed" };
+    if (existing.unsubscribedAt === null) {
+      return { ok: false, error: "already_subscribed" };
+    }
+    return reactivateFeed(existing.id, url, db, env);
   }
 
   // Crée le Feed puis backfill ses articles via le module d'ingestion partagé.
@@ -90,6 +97,44 @@ async function subscribeToFeedUrl(
     ok: true,
     feed: { id: feedId, url, title: result.title },
     articleCount: result.inserted,
+  };
+}
+
+/**
+ * Réactive un Feed désabonné (#14, ADR 0010) : efface `unsubscribed_at`,
+ * réinitialise polling et santé, puis rejoue l'ingestion pour re-backfiller.
+ * Contrairement à l'abonnement initial, **aucun rollback** si l'ingestion
+ * échoue : la ligne Feed et ses Articles Saved préexistent et doivent survivre —
+ * un fetch KO laissera simplement le Feed réactivé en statut « en erreur ».
+ */
+async function reactivateFeed(
+  feedId: string,
+  url: string,
+  db: Db,
+  env: Env,
+): Promise<SubscribeOutcome> {
+  await db
+    .update(feeds)
+    .set({
+      unsubscribed_at: null,
+      next_check_at: null,
+      consecutive_failures: 0,
+      last_error: null,
+      last_error_at: null,
+    })
+    .where(eq(feeds.id, feedId));
+
+  let result: Awaited<ReturnType<typeof ingestFeed>> | null = null;
+  try {
+    result = await ingestFeed(feedId, db, env.BUCKET, env.HMAC_SECRET);
+  } catch (err) {
+    console.error("[feeds] ingestion levée à la réactivation", feedId, err);
+  }
+
+  return {
+    ok: true,
+    feed: { id: feedId, url, title: result?.title ?? null },
+    articleCount: result?.inserted ?? 0,
   };
 }
 
@@ -165,6 +210,8 @@ feedsRoutes.get("/", async (c) => {
       folderId: feeds.folder_id,
     })
     .from(feeds)
+    // Les Feeds désabonnés (#14) sont masqués de la sidebar.
+    .where(isNull(feeds.unsubscribed_at))
     .orderBy(asc(feeds.title), asc(feeds.url));
 
   return c.json({
@@ -348,4 +395,59 @@ feedsRoutes.patch("/:id", async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
   return c.json({ id, ...parsed.data });
+});
+
+/**
+ * Désabonnement (#14, ADR 0010) — action **non destructive** : marque le Feed
+ * `unsubscribed_at` (il sort du Cron, de la sidebar et des vues non-lus), purge
+ * ses Articles **non-Saved** et leurs objets R2, mais **conserve les Saved** et
+ * la ligne Feed (contexte des Saved). Réversible via un ré-abonnement. 404 si le
+ * Feed est inconnu ou déjà désabonné.
+ */
+feedsRoutes.post("/:id/unsubscribe", async (c) => {
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+
+  const updated = await db
+    .update(feeds)
+    .set({ unsubscribed_at: sqlUtcNow() })
+    .where(and(eq(feeds.id, id), isNull(feeds.unsubscribed_at)))
+    .returning({ id: feeds.id });
+  if (updated.length === 0) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  // Purge les Articles non-Saved du Feed + leurs objets R2 ; les Saved restent.
+  await deleteArticlesAndContent(
+    db,
+    c.env.BUCKET,
+    and(eq(articles.feed_id, id), eq(articles.saved, false)) as SQL,
+  );
+
+  return c.json({ id, unsubscribed: true });
+});
+
+/**
+ * Suppression (#14, ADR 0010) — action **destructive** (confirmée côté SPA) :
+ * efface le Feed, **tous** ses Articles (Saved compris) et leurs objets R2.
+ * On supprime d'abord les Articles (FK `articles.feed_id` en ON DELETE no
+ * action) puis la ligne Feed. 404 si le Feed est inconnu.
+ */
+feedsRoutes.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+  const db = getDb(c.env.DB);
+
+  const [feed] = await db
+    .select({ id: feeds.id })
+    .from(feeds)
+    .where(eq(feeds.id, id))
+    .limit(1);
+  if (!feed) {
+    return c.json({ error: "not_found" }, 404);
+  }
+
+  await deleteArticlesAndContent(db, c.env.BUCKET, eq(articles.feed_id, id));
+  await db.delete(feeds).where(eq(feeds.id, id));
+
+  return c.json({ ok: true });
 });

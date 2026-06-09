@@ -147,3 +147,41 @@ export function updateFeedMutationOptions(queryClient: QueryClient) {
     },
   };
 }
+
+/** Invalide liste des feeds + listes/compteurs d'articles après un changement
+ * de cycle de vie (#14) : le feed disparaît de la sidebar et ses articles des
+ * vues non-lus. */
+function invalidateAfterFeedLifecycle(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
+  void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
+  void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+}
+
+/**
+ * Mutation de **désabonnement** (`POST /api/feeds/:id/unsubscribe`, #14). Action
+ * non destructive : arrête le polling, purge les articles non-Saved, conserve
+ * les Saved. Le feed est masqué de la sidebar (invalidation des feeds), ses
+ * articles non-Saved disparaissent des listes/compteurs.
+ */
+export function unsubscribeFeedMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: (id: string) =>
+      apiFetch<{ id: string; unsubscribed: true }>(`/feeds/${id}/unsubscribe`, {
+        method: "POST",
+      }),
+    onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
+  };
+}
+
+/**
+ * Mutation de **suppression** (`DELETE /api/feeds/:id`, #14). Action destructive
+ * (confirmée par l'appelant) : efface le feed et tous ses articles, Saved
+ * compris. Mêmes invalidations que le désabonnement.
+ */
+export function deleteFeedMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: (id: string) =>
+      apiFetch<{ ok: true }>(`/feeds/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
+  };
+}

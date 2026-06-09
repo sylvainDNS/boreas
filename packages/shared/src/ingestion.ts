@@ -1,6 +1,6 @@
 import { extractArticle } from "@boreas/content-extractor";
 import { sanitizeHtml } from "@boreas/html-sanitizer";
-import { eq, isNull, lte, or } from "drizzle-orm";
+import { and, eq, isNull, lte, or, type SQL } from "drizzle-orm";
 import { articleKey } from "./article-identity";
 import { signImageUrl } from "./crypto";
 import type { Db } from "./db";
@@ -402,8 +402,55 @@ export async function getDueFeedIds(
   const rows = await db
     .select({ id: feeds.id })
     .from(feeds)
-    .where(or(isNull(feeds.next_check_at), lte(feeds.next_check_at, nowSql)));
+    // Un Feed désabonné (#14) est sorti de la sélection : son polling s'arrête.
+    .where(
+      and(
+        isNull(feeds.unsubscribed_at),
+        or(isNull(feeds.next_check_at), lte(feeds.next_check_at, nowSql)),
+      ),
+    );
   return rows.map((r) => r.id);
+}
+
+// R2 plafonne une suppression groupée à 1000 clés par appel : on découpe la
+// liste des objets à effacer en lots de cette taille.
+const R2_DELETE_CHUNK = 1000;
+
+/**
+ * Supprime des Articles (et leurs objets R2 de contenu) en respectant la
+ * cohérence des deux stores (ADR 0004) : on efface d'abord les objets R2
+ * référencés par `content_key`, puis les lignes D1. Réutilisable par le
+ * désabonnement et la suppression d'un Feed (#14) comme par la purge de
+ * rétention (#15). Renvoie le nombre de lignes supprimées.
+ *
+ * `where` est la condition Drizzle ciblant les Articles concernés (ex.
+ * `eq(articles.feed_id, id)` ou `and(eq(feed_id, id), eq(saved, false))`). Une
+ * panne R2 sur un objet ne bloque pas la suppression D1 : les orphelins R2
+ * éventuels seront rattrapés par le balayage périodique (#15, ADR 0004).
+ */
+export async function deleteArticlesAndContent(
+  db: Db,
+  bucket: R2Bucket,
+  where: SQL,
+): Promise<number> {
+  const rows = await db
+    .select({ id: articles.id, contentKey: articles.content_key })
+    .from(articles)
+    .where(where);
+
+  const keys = rows
+    .map((r) => r.contentKey)
+    .filter((k): k is string => k !== null);
+  for (let i = 0; i < keys.length; i += R2_DELETE_CHUNK) {
+    try {
+      await bucket.delete(keys.slice(i, i + R2_DELETE_CHUNK));
+    } catch (err) {
+      console.error("[ingestion] suppression d'objets R2 échouée", err);
+    }
+  }
+
+  await db.delete(articles).where(where);
+  return rows.length;
 }
 
 /** Intervalle de rafraîchissement du singleton `settings`, avec repli. */

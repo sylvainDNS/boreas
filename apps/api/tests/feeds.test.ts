@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { getDb, getDueFeedIds } from "@boreas/shared";
 import { issueSession } from "@boreas/shared/crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_COOKIE } from "../src/lib/session";
@@ -488,5 +489,208 @@ describe("GET /api/articles?filter=unread — pagination keyset", () => {
       authed(),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("Cycle de vie d'un Feed (#14) — unsubscribe & delete", () => {
+  async function seedFeed(
+    id: string,
+    opts: { unsubscribedAt?: string | null } = {},
+  ): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO feeds (id, url, title, unsubscribed_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind(
+        id,
+        `https://src.example/${id}.xml`,
+        `Flux ${id}`,
+        opts.unsubscribedAt ?? null,
+      )
+      .run();
+  }
+
+  async function seedArticle(
+    id: string,
+    feedId: string,
+    opts: { saved?: boolean; contentKey?: string | null } = {},
+  ): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO articles (id, feed_id, article_key, title, content_key, saved, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        id,
+        feedId,
+        `key-${id}`,
+        `Art ${id}`,
+        opts.contentKey ?? null,
+        opts.saved ? 1 : 0,
+        "2026-06-05T12:00:00Z",
+      )
+      .run();
+    if (opts.contentKey) await env.BUCKET.put(opts.contentKey, "<p>x</p>");
+  }
+
+  async function rowExists(table: string, id: string): Promise<boolean> {
+    const row = await env.DB.prepare(`SELECT 1 AS n FROM ${table} WHERE id = ?`)
+      .bind(id)
+      .first();
+    return row != null;
+  }
+
+  async function r2Exists(key: string): Promise<boolean> {
+    return (await env.BUCKET.get(key)) != null;
+  }
+
+  describe("POST /api/feeds/:id/unsubscribe", () => {
+    it("refuse l'accès sans session (garde)", async () => {
+      const res = await SELF.fetch(`${ORIGIN}/api/feeds/x/unsubscribe`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("purge les non-Saved (+ R2), conserve les Saved, masque le feed et le sort du Cron", async () => {
+      await seedFeed("f1");
+      await seedArticle("a-plain", "f1", {
+        contentKey: "articles/a-plain.html",
+      });
+      await seedArticle("a-saved", "f1", {
+        saved: true,
+        contentKey: "articles/a-saved.html",
+      });
+
+      const res = await SELF.fetch(
+        `${ORIGIN}/api/feeds/f1/unsubscribe`,
+        authed({ method: "POST" }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ id: "f1", unsubscribed: true });
+
+      // Non-Saved purgé (D1 + R2) ; Saved conservé (D1 + R2).
+      expect(await rowExists("articles", "a-plain")).toBe(false);
+      expect(await r2Exists("articles/a-plain.html")).toBe(false);
+      expect(await rowExists("articles", "a-saved")).toBe(true);
+      expect(await r2Exists("articles/a-saved.html")).toBe(true);
+
+      // Feed conservé mais marqué désabonné et masqué de GET /feeds.
+      const feedRow = await env.DB.prepare(
+        "SELECT unsubscribed_at FROM feeds WHERE id = ?",
+      )
+        .bind("f1")
+        .first<{ unsubscribed_at: string | null }>();
+      expect(feedRow?.unsubscribed_at).toBeTruthy();
+      const list = (await (
+        await SELF.fetch(`${ORIGIN}/api/feeds`, authed())
+      ).json()) as { feeds: { id: string }[] };
+      expect(list.feeds.map((f) => f.id)).not.toContain("f1");
+
+      // Sorti de la sélection Cron.
+      const due = await getDueFeedIds(getDb(env.DB));
+      expect(due).not.toContain("f1");
+    });
+
+    it("renvoie 404 sur un feed inconnu", async () => {
+      const res = await SELF.fetch(
+        `${ORIGIN}/api/feeds/inconnu/unsubscribe`,
+        authed({ method: "POST" }),
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("renvoie 404 si le feed est déjà désabonné", async () => {
+      await seedFeed("f-off", { unsubscribedAt: "2026-06-01T00:00:00Z" });
+      const res = await SELF.fetch(
+        `${ORIGIN}/api/feeds/f-off/unsubscribe`,
+        authed({ method: "POST" }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("DELETE /api/feeds/:id", () => {
+    it("refuse l'accès sans session (garde)", async () => {
+      const res = await SELF.fetch(`${ORIGIN}/api/feeds/x`, {
+        method: "DELETE",
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("efface le feed, tous ses articles (Saved compris) et leurs objets R2", async () => {
+      await seedFeed("f2");
+      await seedArticle("d-plain", "f2", {
+        contentKey: "articles/d-plain.html",
+      });
+      await seedArticle("d-saved", "f2", {
+        saved: true,
+        contentKey: "articles/d-saved.html",
+      });
+
+      const res = await SELF.fetch(
+        `${ORIGIN}/api/feeds/f2`,
+        authed({ method: "DELETE" }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+
+      expect(await rowExists("feeds", "f2")).toBe(false);
+      expect(await rowExists("articles", "d-plain")).toBe(false);
+      expect(await rowExists("articles", "d-saved")).toBe(false);
+      expect(await r2Exists("articles/d-plain.html")).toBe(false);
+      expect(await r2Exists("articles/d-saved.html")).toBe(false);
+    });
+
+    it("renvoie 404 sur un feed inconnu", async () => {
+      const res = await SELF.fetch(
+        `${ORIGIN}/api/feeds/inconnu`,
+        authed({ method: "DELETE" }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("Réabonnement = réactivation (ADR 0010)", () => {
+    it("réactive un feed désabonné au lieu de 409 et re-backfille", async () => {
+      const url = "https://src.example/react.xml";
+      mockOutboundFetch(200, RSS(ITEM(1)));
+      const sub = await SELF.fetch(
+        `${ORIGIN}/api/feeds`,
+        authed({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url }),
+        }),
+      );
+      expect(sub.status).toBe(201);
+      const feedId = ((await sub.json()) as { feed: { id: string } }).feed.id;
+
+      await SELF.fetch(
+        `${ORIGIN}/api/feeds/${feedId}/unsubscribe`,
+        authed({ method: "POST" }),
+      );
+
+      // Réabonnement à la même URL : pas de 409, le feed est réactivé.
+      mockOutboundFetch(200, RSS(`${ITEM(1)}${ITEM(2)}`));
+      const re = await SELF.fetch(
+        `${ORIGIN}/api/feeds`,
+        authed({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url }),
+        }),
+      );
+      expect(re.status).toBe(201);
+
+      // unsubscribed_at remis à null et feed de nouveau listé.
+      const feedRow = await env.DB.prepare(
+        "SELECT unsubscribed_at FROM feeds WHERE id = ?",
+      )
+        .bind(feedId)
+        .first<{ unsubscribed_at: string | null }>();
+      expect(feedRow?.unsubscribed_at).toBeNull();
+      const list = (await (
+        await SELF.fetch(`${ORIGIN}/api/feeds`, authed())
+      ).json()) as { feeds: { id: string }[] };
+      expect(list.feeds.map((f) => f.id)).toContain(feedId);
+    });
   });
 });

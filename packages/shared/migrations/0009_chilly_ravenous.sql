@@ -1,0 +1,1 @@
+ALTER TABLE `feeds` ADD `unsubscribed_at` text;

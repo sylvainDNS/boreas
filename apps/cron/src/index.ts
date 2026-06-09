@@ -12,6 +12,7 @@ import {
   getDueFeedIds,
   type IngestionMessage,
   ingestFeed,
+  runRetention,
 } from "@boreas/shared";
 
 interface Env {
@@ -27,8 +28,12 @@ interface Env {
 export default {
   /**
    * Cron Trigger (~5 min) : sélectionne les Feeds dus (`next_check_at` échu ou
-   * null) et enqueue un message par Feed. (ADR 0002)
-   * TODO #15 : déclencher ici la purge de rétention.
+   * null) et enqueue un message par Feed (ADR 0002), puis lance la rétention
+   * (#15) — purge des Articles Read & non-Saved expirés + balayage des orphelins
+   * R2. La rétention est isolée dans son propre try/catch pour qu'un échec
+   * n'affecte pas l'enqueue déjà émis. Elle tourne à chaque tick : la purge est
+   * bon marché et le sweep R2 reste léger à l'échelle perso (un throttling
+   * quotidien pourra être ajouté si le volume R2 grossit).
    */
   async scheduled(
     event: ScheduledEvent,
@@ -44,6 +49,12 @@ export default {
     });
 
     await enqueueFeedIds(env.INGESTION_QUEUE, ids);
+
+    try {
+      await runRetention(db, env.BUCKET);
+    } catch (err) {
+      console.error("[cron:scheduled] rétention a levé", err);
+    }
   },
 
   /**

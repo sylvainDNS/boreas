@@ -4,6 +4,6 @@ import { defineConfig } from "vitest/config";
 // Chaque package est la source unique de sa propre configuration de tests.
 export default defineConfig({
   test: {
-    projects: ["packages/*", "apps/api", "apps/web"],
+    projects: ["packages/*", "apps/api", "apps/cron", "apps/web"],
   },
 });

@@ -7,6 +7,7 @@ import { authRoutes } from "./routes/auth";
 import { feedsRoutes } from "./routes/feeds";
 import { foldersRoutes } from "./routes/folders";
 import { imgRoutes } from "./routes/img";
+import { opmlRoutes } from "./routes/opml";
 import { refreshRoutes } from "./routes/refresh";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -34,6 +35,7 @@ app.route("/api/feeds", feedsRoutes);
 app.route("/api/folders", foldersRoutes);
 app.route("/api/articles", articlesRoutes);
 app.route("/api/refresh", refreshRoutes);
+app.route("/api/opml", opmlRoutes);
 app.route("/api/img", imgRoutes);
 
 /**

@@ -148,7 +148,7 @@ export function updateFeedMutationOptions(queryClient: QueryClient) {
  * abonnement (#12), renommage/déplacement (#13), désabonnement/suppression (#14).
  * Centralisé pour qu'une clé dépendant d'un feed ajoutée ici le soit partout.
  */
-function invalidateAfterFeedLifecycle(queryClient: QueryClient): void {
+export function invalidateAfterFeedLifecycle(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
   void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
   void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });

@@ -359,6 +359,6 @@ describe("GET /api/articles/counts — compteurs non-lus (#8)", () => {
     // « article inconnu » qui signalerait une capture par GET /:id.
     const res = await SELF.fetch(`${ORIGIN}/api/articles/counts`, authed());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 0, byFeed: [] });
+    expect(await res.json()).toEqual({ total: 0, byFeed: [], byFolder: [] });
   });
 });

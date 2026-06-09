@@ -4,9 +4,11 @@ import { useMemo, useState } from "react";
 import { articleCountsQueryOptions } from "../lib/articles";
 import { AUTH_QUERY_KEY, logout } from "../lib/auth";
 import {
+  deleteFeedMutationOptions,
   type Feed,
   feedLabel,
   feedsQueryOptions,
+  unsubscribeFeedMutationOptions,
   updateFeedMutationOptions,
 } from "../lib/feeds";
 import {
@@ -44,6 +46,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null);
+  // Cibles des actions de cycle de vie d'un Feed (#14).
+  const [feedToUnsubscribe, setFeedToUnsubscribe] = useState<Feed | null>(null);
+  const [feedToDelete, setFeedToDelete] = useState<Feed | null>(null);
   // Folders repliés (par défaut tous dépliés : un id présent = replié).
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
@@ -65,6 +70,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const renameFolder = useMutation(renameFolderMutationOptions(queryClient));
   const deleteFolder = useMutation(deleteFolderMutationOptions(queryClient));
   const updateFeed = useMutation(updateFeedMutationOptions(queryClient));
+  const unsubscribeFeed = useMutation(
+    unsubscribeFeedMutationOptions(queryClient),
+  );
+  const deleteFeed = useMutation(deleteFeedMutationOptions(queryClient));
 
   const foldersData = folders.data ?? [];
   const feedsData = feeds.data ?? [];
@@ -100,6 +109,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   function moveFeed(id: string, folderId: string | null) {
     updateFeed.mutate({ id, folderId });
+  }
+
+  // Après désabonnement/suppression, le feed quitte la sidebar : si on était sur
+  // sa page, on retombe sur « Tous les non-lus » plutôt que sur une vue vide.
+  function leaveFeedIfActive(feedId: string) {
+    if (matchRoute({ to: "/feeds/$feedId", params: { feedId } })) {
+      void navigate({ to: "/" });
+    }
   }
 
   async function handleLogout() {
@@ -181,6 +198,29 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   {feed.folderId === folder.id ? " ✓" : ""}
                 </button>
               ))}
+              <div className="my-1 border-border border-t" />
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass}
+                onClick={() => {
+                  close();
+                  setFeedToUnsubscribe(feed);
+                }}
+              >
+                Se désabonner
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`${menuItemClass} text-danger`}
+                onClick={() => {
+                  close();
+                  setFeedToDelete(feed);
+                }}
+              >
+                Supprimer…
+              </button>
             </>
           )}
         </RowMenu>
@@ -449,6 +489,99 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             }}
           >
             {deleteFolder.isPending ? "…" : "Supprimer"}
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Confirmation de désabonnement d'un Feed (#14, non destructif). */}
+      <Dialog
+        open={feedToUnsubscribe !== null}
+        onClose={() => {
+          setFeedToUnsubscribe(null);
+          unsubscribeFeed.reset();
+        }}
+        title="Se désabonner du flux"
+      >
+        <p className="text-sm text-text">
+          Se désabonner de «&nbsp;
+          {feedToUnsubscribe ? feedLabel(feedToUnsubscribe) : ""}&nbsp;» ? Le
+          polling s'arrête et les articles non sauvegardés sont supprimés. Les
+          articles <strong>sauvegardés sont conservés</strong> et restent
+          accessibles dans la vue Saved.
+        </p>
+        {unsubscribeFeed.isError && (
+          <p
+            className="mt-3 text-red-600 text-sm dark:text-red-400"
+            role="alert"
+          >
+            Désabonnement impossible, réessayez.
+          </p>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setFeedToUnsubscribe(null)}>
+            Annuler
+          </Button>
+          <Button
+            variant="primary"
+            disabled={unsubscribeFeed.isPending}
+            onClick={() => {
+              if (!feedToUnsubscribe) return;
+              const id = feedToUnsubscribe.id;
+              unsubscribeFeed.mutate(id, {
+                onSuccess: () => {
+                  setFeedToUnsubscribe(null);
+                  leaveFeedIfActive(id);
+                },
+              });
+            }}
+          >
+            {unsubscribeFeed.isPending ? "…" : "Se désabonner"}
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Confirmation de suppression d'un Feed (#14, destructif). */}
+      <Dialog
+        open={feedToDelete !== null}
+        onClose={() => {
+          setFeedToDelete(null);
+          deleteFeed.reset();
+        }}
+        title="Supprimer le flux"
+      >
+        <p className="text-sm text-text">
+          Supprimer définitivement «&nbsp;
+          {feedToDelete ? feedLabel(feedToDelete) : ""}&nbsp;» ? Le flux et{" "}
+          <strong>tous ses articles, y compris les sauvegardés</strong>, seront
+          effacés. Cette action est irréversible.
+        </p>
+        {deleteFeed.isError && (
+          <p
+            className="mt-3 text-red-600 text-sm dark:text-red-400"
+            role="alert"
+          >
+            Suppression impossible, réessayez.
+          </p>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setFeedToDelete(null)}>
+            Annuler
+          </Button>
+          <Button
+            variant="danger"
+            disabled={deleteFeed.isPending}
+            onClick={() => {
+              if (!feedToDelete) return;
+              const id = feedToDelete.id;
+              deleteFeed.mutate(id, {
+                onSuccess: () => {
+                  setFeedToDelete(null);
+                  leaveFeedIfActive(id);
+                },
+              });
+            }}
+          >
+            {deleteFeed.isPending ? "…" : "Supprimer"}
           </Button>
         </div>
       </Dialog>

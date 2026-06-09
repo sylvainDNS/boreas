@@ -362,3 +362,54 @@ describe("GET /api/articles/counts — compteurs non-lus (#8)", () => {
     expect(await res.json()).toEqual({ total: 0, byFeed: [], byFolder: [] });
   });
 });
+
+describe("Feeds désabonnés (#14) — exclusion des vues non-lus", () => {
+  /** Insère un Feed déjà marqué désabonné. */
+  async function seedUnsubscribedFeed(): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO feeds (id, url, title, unsubscribed_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind(
+        "feed-off",
+        "https://src.example/off.xml",
+        "Flux désabonné",
+        "2026-06-01T00:00:00Z",
+      )
+      .run();
+  }
+
+  it("exclut un Saved+non-lu d'un feed désabonné des vues unread/all/compteurs, mais le garde dans Saved", async () => {
+    await seedUnsubscribedFeed();
+    // Saved + non-lu dans le feed désabonné (cas typique : article gardé).
+    await seedArticle({
+      id: "art-off",
+      feedId: "feed-off",
+      saved: true,
+      read: false,
+    });
+    // Témoin : un non-lu dans un feed actif.
+    await seedArticle({ id: "art-on", feedId: "feed-1", read: false });
+
+    const unread = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=unread`, authed())
+    ).json()) as { articles: { id: string }[] };
+    expect(unread.articles.map((a) => a.id)).toEqual(["art-on"]);
+
+    const all = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=all`, authed())
+    ).json()) as { articles: { id: string }[] };
+    expect(all.articles.map((a) => a.id)).not.toContain("art-off");
+
+    // La vue Saved, elle, conserve l'article du feed désabonné.
+    const saved = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=saved`, authed())
+    ).json()) as { articles: { id: string }[] };
+    expect(saved.articles.map((a) => a.id)).toContain("art-off");
+
+    const counts = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles/counts`, authed())
+    ).json()) as { total: number; byFeed: { feedId: string }[] };
+    expect(counts.total).toBe(1);
+    expect(counts.byFeed.map((b) => b.feedId)).not.toContain("feed-off");
+  });
+});

@@ -25,6 +25,7 @@ export type {
 export {
   buildConditionalHeaders,
   computeNextCheckAt,
+  deleteArticlesAndContent,
   ERROR_THRESHOLD,
   enqueueFeedIds,
   fetchFeed,

@@ -112,6 +112,54 @@ describe("GET /api/img — proxy d'images", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("rejette une redirection vers une cible non http(s) en 502 (anti-SSRF)", async () => {
+    const src = "https://magazine.example/photos/redir.png";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: "file:///etc/passwd" },
+          }),
+      ),
+    );
+    const res = await SELF.fetch(proxyUrl(src), authed());
+    expect(res.status).toBe(502);
+    expect(await env.BUCKET.get(imageCacheKey(src))).toBeNull();
+  });
+
+  it("suit une redirection http(s) légitime puis sert l'image", async () => {
+    const src = "https://magazine.example/photos/moved.png";
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url === src) {
+        return new Response(null, {
+          status: 301,
+          headers: { location: "https://cdn.example/real.png" },
+        });
+      }
+      return new Response(PNG_BYTES, {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const res = await SELF.fetch(proxyUrl(src), authed());
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(PNG_BYTES);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("renvoie 502 et ne cache pas un corps vide (réponse tronquée)", async () => {
+    const src = "https://magazine.example/photos/empty.png";
+    mockOutboundFetch(new Uint8Array([]), { contentType: "image/png" });
+    const res = await SELF.fetch(proxyUrl(src), authed());
+    expect(res.status).toBe(502);
+    expect(await env.BUCKET.get(imageCacheKey(src))).toBeNull();
+  });
+
   it("fetch + cache R2 sur miss, puis sert depuis le cache au 2e appel", async () => {
     const src = "https://magazine.example/photos/fresh.png";
     const fetchSpy = mockOutboundFetch(PNG_BYTES, { contentType: "image/png" });

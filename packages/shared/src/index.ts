@@ -28,6 +28,7 @@ export {
   deleteArticlesAndContent,
   ERROR_THRESHOLD,
   enqueueFeedIds,
+  FEED_REACTIVATION_RESET,
   fetchFeed,
   getDueFeedIds,
   ingestFeed,

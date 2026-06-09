@@ -6,6 +6,7 @@ import {
   deleteArticlesAndContent,
   discoverFeeds,
   ERROR_THRESHOLD,
+  FEED_REACTIVATION_RESET,
   feeds,
   fetchFeed,
   folders,
@@ -120,15 +121,7 @@ async function reactivateFeed(
 ): Promise<SubscribeOutcome> {
   await db
     .update(feeds)
-    .set({
-      unsubscribed_at: null,
-      next_check_at: null,
-      etag: null,
-      last_modified: null,
-      consecutive_failures: 0,
-      last_error: null,
-      last_error_at: null,
-    })
+    .set(FEED_REACTIVATION_RESET)
     .where(eq(feeds.id, feedId));
 
   let result: Awaited<ReturnType<typeof ingestFeed>> | null = null;

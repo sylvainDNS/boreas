@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Article } from "../lib/articles";
+import type { ArticleView } from "../lib/use-article-view";
 import { ArticleCard } from "./ArticleCard";
 import { EmptyState } from "./EmptyState";
 import { ReaderPane } from "./ReaderPane";
@@ -7,59 +7,37 @@ import { CountBadge } from "./ui/Badge";
 import { IconButton } from "./ui/IconButton";
 
 interface ArticleListViewProps {
-  title: string;
-  articles: Article[];
-  /** Texte de l'état vide quand la liste est vide. */
-  emptyLabel?: string;
-  /** Nombre de non-lus exact (compteur API #8) ; à défaut, dérivé de la liste. */
-  unreadCount?: number;
-  /** Chargement initial (première page). */
-  isLoading?: boolean;
-  /** Erreur de chargement. */
-  isError?: boolean;
-  /** Reste-t-il des pages à charger ? */
-  hasNextPage?: boolean;
-  /** Une page suivante est en cours de chargement. */
-  isFetchingNextPage?: boolean;
-  /** Demande la page suivante (scroll infini). */
-  onEndReached?: () => void;
-  /** Les lus sont-ils affichés ? (interrupteur #8, US 20). */
-  showRead?: boolean;
-  /** Bascule afficher/masquer les lus. */
-  onToggleShowRead?: () => void;
-  /** Bascule Read↔non-lu d'un article (#8). `read` = nouvel état souhaité. */
-  onToggleRead?: (id: string, read: boolean) => void;
-  /** Bascule Saved↔non-Saved d'un article (#9). `saved` = nouvel état souhaité. */
-  onToggleSaved?: (id: string, saved: boolean) => void;
-  /** « Tout marquer comme lu » sur la portée de la vue (#8). */
-  onMarkAllRead?: () => void;
-  /** Refresh manuel : déclenche une récupération serveur des flux (#10). */
-  onRefresh?: () => void;
-  /** Un refresh est en cours (anime l'icône, désactive le bouton). */
-  isRefreshing?: boolean;
+  /** Modèle de vue calculé par `useArticleView(scope)` (#47). */
+  view: ArticleView;
 }
 
 /** Vue générique « liste + lecteur » des tranches de lecture (#6, #8, #9, #13…).
  *  Desktop ≥ lg : deux panneaux côte à côte. En dessous : drill-down liste → lecteur.
- *  La vue « Tous les non-lus » (#6) y branche un scroll infini via `onEndReached`. */
-export function ArticleListView({
-  title,
-  articles,
-  emptyLabel = "Aucun article à afficher.",
-  unreadCount,
-  isLoading = false,
-  isError = false,
-  hasNextPage = false,
-  isFetchingNextPage = false,
-  onEndReached,
-  showRead,
-  onToggleShowRead,
-  onToggleRead,
-  onToggleSaved,
-  onMarkAllRead,
-  onRefresh,
-  isRefreshing = false,
-}: ArticleListViewProps) {
+ *  La vue « Tous les non-lus » (#6) y branche un scroll infini via `onEndReached`.
+ *
+ *  Toute la donnée et les callbacks proviennent d'un unique `view` (#47) : les
+ *  routes ne câblent plus 15 props pass-through, mais délèguent à `useArticleView`.
+ */
+export function ArticleListView({ view }: ArticleListViewProps) {
+  const {
+    title,
+    articles,
+    emptyLabel = "Aucun article à afficher.",
+    unreadCount,
+    isLoading = false,
+    isError = false,
+    hasNextPage = false,
+    isFetchingNextPage = false,
+    onEndReached,
+    showRead,
+    onToggleShowRead,
+    onToggleRead,
+    onToggleSaved,
+    onMarkAllRead,
+    onRefresh,
+    isRefreshing = false,
+  } = view;
+
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   // Cherche la sélection DANS la liste courante : si l'article sélectionné
   // n'appartient pas à cette vue (navigation entre routes réutilisant ce

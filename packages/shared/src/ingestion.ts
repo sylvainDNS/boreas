@@ -29,24 +29,6 @@ const DEFAULT_REFRESH_INTERVAL_MIN = 30;
 /** Échecs consécutifs à partir desquels un Feed est considéré « en erreur » (#11). */
 export const ERROR_THRESHOLD = 3;
 
-/**
- * Champs de remise à zéro d'un Feed à sa **réactivation** (#14) : on efface les
- * validateurs de GET conditionnel — sinon l'origine répondrait 304 et le
- * re-backfill n'insérerait rien alors que les Articles non-Saved ont été purgés —
- * et l'état de santé/polling, pour repartir d'un fetch complet. Partagé par le
- * ré-abonnement (`feeds.ts`) et l'import OPML (`opml.ts`) : toute colonne de
- * santé ajoutée ici se propage aux deux chemins de réactivation.
- */
-export const FEED_REACTIVATION_RESET = {
-  unsubscribed_at: null,
-  next_check_at: null,
-  etag: null,
-  last_modified: null,
-  consecutive_failures: 0,
-  last_error: null,
-  last_error_at: null,
-} as const;
-
 // Plafond du backoff exponentiel : un Feed cassé n'est jamais re-vérifié plus
 // rarement qu'une fois par 24 h, pour récupérer vite quand il revient (#11).
 const MAX_BACKOFF_MIN = 24 * 60;

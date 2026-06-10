@@ -6,11 +6,11 @@ import { buildOpml, parseOpml } from "@boreas/opml";
 import {
   chunk,
   enqueueFeedIds,
-  FEED_REACTIVATION_RESET,
   feeds,
   folders,
   getDb,
   insertChunkSize,
+  resubscribeFeeds,
   whereInChunkSize,
 } from "@boreas/shared";
 import { inArray, isNull } from "drizzle-orm";
@@ -23,8 +23,6 @@ import type { Env } from "../env";
 const FEED_INSERT_CHUNK = insertChunkSize(4);
 // INSERT folders : 2 colonnes par ligne (id, name).
 const FOLDER_INSERT_CHUNK = insertChunkSize(2);
-// UPDATE … WHERE id IN (…) : ~16 paramètres réservés au `set`, le reste pour les ids.
-const FEED_UPDATE_CHUNK = whereInChunkSize(16);
 
 /**
  * Routes OPML (montées sur /api/opml), sous le middleware de session. Permettent
@@ -38,8 +36,9 @@ export const opmlRoutes = new Hono<{ Bindings: Env }>();
 /**
  * POST /api/opml/import — importe un OPML (corps JSON `{ opml }`, le SPA lit le
  * fichier côté client). Pour chaque flux : un abonnement **actif** est ignoré, un
- * Feed **désabonné** (#14) est réactivé (resets partagés avec `feeds.ts`, mais
- * sans ingestion synchrone), un flux inconnu est créé. Le backfill de tous les
+ * Feed **désabonné** (#14) fait l'objet d'un **Resubscribe** (module partagé
+ * `resubscribeFeeds`, mais sans ingestion synchrone — déférée à la Queue), un
+ * flux inconnu est créé. Le backfill de tous les
  * Feeds touchés est déféré à la Queue (fan-out, ADR 0002).
  *
  * Les lectures/écritures se font **en lot** plutôt qu'un aller-retour D1 par flux
@@ -124,7 +123,7 @@ opmlRoutes.post("/import", async (c) => {
     }
   }
 
-  // 3. Classe chaque entrée : ignorée (active), à réactiver (désabonnée), ou à
+  // 3. Classe chaque entrée : ignorée (active), à réabonner (désabonnée), ou à
   // créer (inconnue). `parseOpml` a déjà dédupliqué par URL.
   const toInsert: {
     id: string;
@@ -132,9 +131,9 @@ opmlRoutes.post("/import", async (c) => {
     title: string | null;
     folder_id: string | null;
   }[] = [];
-  // Réactivations regroupées par Folder cible : `null` = ne pas toucher au
+  // Resubscribe regroupés par Folder cible : `null` = ne pas toucher au
   // rattachement existant (l'OPML ne range pas ce flux), une valeur = (ré)assigner.
-  const reactivateByFolder = new Map<string | null, string[]>();
+  const resubscribeByFolder = new Map<string | null, string[]>();
   let skipped = 0;
 
   for (const entry of entries) {
@@ -148,9 +147,9 @@ opmlRoutes.post("/import", async (c) => {
         skipped += 1;
         continue;
       }
-      const group = reactivateByFolder.get(folderId) ?? [];
+      const group = resubscribeByFolder.get(folderId) ?? [];
       group.push(existing.id);
-      reactivateByFolder.set(folderId, group);
+      resubscribeByFolder.set(folderId, group);
       continue;
     }
 
@@ -177,17 +176,13 @@ opmlRoutes.post("/import", async (c) => {
     imported += inserted.length;
   }
 
-  // 4b. Réactivations groupées par Folder cible. Le reset de santé/polling est
-  // partagé avec le ré-abonnement (`FEED_REACTIVATION_RESET`) ; `folder_id` n'est
-  // (ré)assigné que si l'OPML range le flux, pour ne pas désassigner sans raison.
+  // 4b. Resubscribe groupés par Folder cible. Le reset de santé/polling est
+  // possédé par le module partagé (`resubscribeFeeds`, #42) ; on appelle une fois
+  // par groupe sans les fusionner — `folder_id` n'est (ré)assigné que si l'OPML
+  // range le flux (clé non-null), pour ne pas désassigner sans raison.
   let reactivated = 0;
-  for (const [folderId, ids] of reactivateByFolder) {
-    const set = folderId
-      ? { ...FEED_REACTIVATION_RESET, folder_id: folderId }
-      : FEED_REACTIVATION_RESET;
-    for (const group of chunk(ids, FEED_UPDATE_CHUNK)) {
-      await db.update(feeds).set(set).where(inArray(feeds.id, group));
-    }
+  for (const [folderId, ids] of resubscribeByFolder) {
+    await resubscribeFeeds(db, ids, folderId ? { folderId } : undefined);
     toBackfill.push(...ids);
     reactivated += ids.length;
   }

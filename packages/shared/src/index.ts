@@ -35,11 +35,12 @@ export {
   deleteArticlesAndContent,
   ERROR_THRESHOLD,
   enqueueFeedIds,
-  FEED_REACTIVATION_RESET,
   fetchFeed,
   getDueFeedIds,
   ingestFeed,
 } from "./ingestion";
+export type { ResubscribeOptions } from "./resubscribe";
+export { resubscribeFeed, resubscribeFeeds } from "./resubscribe";
 export {
   purgeExpiredArticles,
   runRetention,

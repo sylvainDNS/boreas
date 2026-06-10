@@ -32,6 +32,10 @@ _Avoid_: Starred, Favorite, Bookmark, Read-later
 Action non destructive : arrête le polling du **Feed**, purge ses **Articles** non-**Saved**, mais **conserve les Saved** (le Feed est masqué, pas effacé). Réversible.
 _Avoid_: Delete, Remove (réservés au hard-delete)
 
+**Resubscribe** (Réabonnement):
+Inverse d'**Unsubscribe** — efface `unsubscribed_at` et réinitialise toute la santé du **Feed** (etag/last_modified, échecs consécutifs, erreurs, échéance de polling) pour forcer un fetch complet au re-backfill. Les **Saved** conservés restent.
+_Avoid_: Reactivate, Re-enable
+
 **Delete** (Suppression):
 Action destructive et explicite : efface le **Feed** et **tous** ses **Articles**, **Saved compris**. Irréversible.
 _Avoid_: Unsubscribe

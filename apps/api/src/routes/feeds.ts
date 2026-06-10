@@ -19,12 +19,12 @@ import {
   deleteArticlesAndContent,
   discoverFeeds,
   ERROR_THRESHOLD,
-  FEED_REACTIVATION_RESET,
   feeds,
   fetchFeed,
   folders,
   getDb,
   ingestFeed,
+  resubscribeFeed,
   sqlUtcNow,
 } from "@boreas/shared";
 import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
@@ -59,8 +59,8 @@ async function subscribeToFeedUrl(
   env: Env,
 ): Promise<SubscribeOutcome> {
   // Dédup d'abonnement. Un Feed déjà **actif** est refusé (doublon). Un Feed
-  // **désabonné** (#14, ADR 0010) est réactivé plutôt que refusé : se réabonner
-  // est réversible, on relance son polling en conservant ses Articles Saved.
+  // **désabonné** (#14, ADR 0010) est **Resubscribe** plutôt que refusé : se
+  // réabonner est réversible, on relance son polling en conservant ses Saved.
   const [existing] = await db
     .select({ id: feeds.id, unsubscribedAt: feeds.unsubscribed_at })
     .from(feeds)
@@ -70,7 +70,7 @@ async function subscribeToFeedUrl(
     if (existing.unsubscribedAt === null) {
       return { ok: false, error: "already_subscribed" };
     }
-    return reactivateFeed(existing.id, url, db, env);
+    return resubscribeAndBackfill(existing.id, url, db, env);
   }
 
   // Crée le Feed puis backfill ses articles via le module d'ingestion partagé.
@@ -112,33 +112,26 @@ async function subscribeToFeedUrl(
 }
 
 /**
- * Réactive un Feed désabonné (#14, ADR 0010) : efface `unsubscribed_at`,
- * réinitialise polling et santé, puis rejoue l'ingestion pour re-backfiller.
+ * Resubscribe d'un Feed désabonné (#14, #42, ADR 0010) : `resubscribeFeed`
+ * efface `unsubscribed_at` et réinitialise polling/santé (l'invariant vit dans
+ * `@boreas/shared`), puis on rejoue l'ingestion **synchrone** pour re-backfiller.
  * Contrairement à l'abonnement initial, **aucun rollback** si l'ingestion
  * échoue : la ligne Feed et ses Articles Saved préexistent et doivent survivre —
- * un fetch KO laissera simplement le Feed réactivé en statut « en erreur ».
- *
- * On efface aussi `etag`/`last_modified` : sans cela, `ingestFeed` rejouerait le
- * GET conditionnel avec les validateurs d'avant le désabonnement, l'origine
- * répondrait 304 et le re-backfill n'insérerait rien (alors que les Articles
- * non-Saved ont justement été purgés). On force donc un fetch complet.
+ * un fetch KO laissera simplement le Feed réabonné en statut « en erreur ».
  */
-async function reactivateFeed(
+async function resubscribeAndBackfill(
   feedId: string,
   url: string,
   db: Db,
   env: Env,
 ): Promise<SubscribeOutcome> {
-  await db
-    .update(feeds)
-    .set(FEED_REACTIVATION_RESET)
-    .where(eq(feeds.id, feedId));
+  await resubscribeFeed(db, feedId);
 
   let result: Awaited<ReturnType<typeof ingestFeed>> | null = null;
   try {
     result = await ingestFeed(feedId, db, env.BUCKET, env.HMAC_SECRET);
   } catch (err) {
-    console.error("[feeds] ingestion levée à la réactivation", feedId, err);
+    console.error("[feeds] ingestion levée au réabonnement", feedId, err);
   }
 
   return {

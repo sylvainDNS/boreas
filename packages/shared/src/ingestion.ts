@@ -99,7 +99,7 @@ const QUEUE_BATCH_MAX = 100;
  * et le Cron `scheduled` (ADR 0002).
  */
 export async function enqueueFeedIds(
-  queue: Queue<IngestionMessage>,
+  queue: Pick<Queue<IngestionMessage>, "sendBatch">,
   feedIds: string[],
 ): Promise<void> {
   for (const batch of chunk(feedIds, QUEUE_BATCH_MAX)) {

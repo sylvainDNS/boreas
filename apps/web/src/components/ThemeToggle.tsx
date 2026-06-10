@@ -1,5 +1,4 @@
-import type { ThemePreference } from "../lib/theme";
-import { useTheme } from "../lib/use-theme";
+import { type ThemePreference, useTheme } from "../lib/theme";
 
 const OPTIONS: { value: ThemePreference; label: string; icon: string }[] = [
   { value: "light", label: "Clair", icon: "☀" },

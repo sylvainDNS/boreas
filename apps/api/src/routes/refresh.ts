@@ -1,3 +1,4 @@
+import type { RefreshResponse } from "@boreas/api-contracts";
 import { enqueueFeedIds, feeds, getDb } from "@boreas/shared";
 import { isNull } from "drizzle-orm";
 import { Hono } from "hono";
@@ -24,5 +25,5 @@ refreshRoutes.post("/", async (c) => {
     c.env.INGESTION_QUEUE,
     rows.map((r) => r.id),
   );
-  return c.json({ enqueued: rows.length });
+  return c.json({ enqueued: rows.length } satisfies RefreshResponse);
 });

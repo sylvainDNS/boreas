@@ -1,3 +1,10 @@
+import type {
+  Folder,
+  FolderCreatedResponse,
+  FolderRenamedResponse,
+  FoldersResponse,
+  OkResponse,
+} from "@boreas/api-contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { queryOptions } from "@tanstack/react-query";
 import { apiFetch } from "./api";
@@ -8,15 +15,8 @@ import {
 } from "./articles";
 import { FEEDS_LIST_KEY } from "./feeds";
 
-/** Folder côté SPA (#13) : regroupement plat de Feeds. */
-export interface Folder {
-  id: string;
-  name: string;
-}
-
-interface FoldersResponse {
-  folders: Folder[];
-}
+/** Folder côté SPA (#13) : regroupement plat de Feeds. Contrat wire partagé. */
+export type { Folder };
 
 /** Clé du cache de la liste des folders. */
 export const FOLDERS_LIST_KEY = ["folders", "list"] as const;
@@ -37,7 +37,7 @@ export function foldersQueryOptions() {
 export function createFolderMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: (name: string) =>
-      apiFetch<{ folder: Folder }>("/folders", {
+      apiFetch<FolderCreatedResponse>("/folders", {
         method: "POST",
         body: JSON.stringify({ name }),
       }),
@@ -51,7 +51,7 @@ export function createFolderMutationOptions(queryClient: QueryClient) {
 export function renameFolderMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: ({ id, name }: { id: string; name: string }) =>
-      apiFetch<{ id: string; name: string }>(`/folders/${id}`, {
+      apiFetch<FolderRenamedResponse>(`/folders/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ name }),
       }),
@@ -69,7 +69,7 @@ export function renameFolderMutationOptions(queryClient: QueryClient) {
 export function deleteFolderMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: (id: string) =>
-      apiFetch<{ ok: true }>(`/folders/${id}`, { method: "DELETE" }),
+      apiFetch<OkResponse>(`/folders/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: FOLDERS_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });

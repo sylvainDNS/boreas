@@ -1,7 +1,10 @@
+import {
+  type SettingsResponse,
+  settingsPatchSchema,
+} from "@boreas/api-contracts";
 import { getDb, settings } from "@boreas/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { Env } from "../env";
 
 /**
@@ -14,25 +17,6 @@ import type { Env } from "../env";
  * Monté sur /api/settings, sous la garde de session (absent de `isPublicPath`).
  */
 export const settingsRoutes = new Hono<{ Bindings: Env }>();
-
-/**
- * PATCH partiel : au moins un champ requis (`.refine`, comme `articles.ts`). Les
- * bornes sont larges côté serveur (1 min – 24 h, 1 j – 10 ans) ; les presets de
- * l'UI sont une contrainte d'ergonomie, pas d'API.
- */
-const patchSchema = z
-  .object({
-    refreshIntervalMin: z.number().int().min(1).max(1440).optional(),
-    purgeWindowDays: z.number().int().min(1).max(3650).optional(),
-    theme: z.enum(["light", "dark", "system"]).optional(),
-  })
-  .refine(
-    (d) =>
-      d.refreshIntervalMin !== undefined ||
-      d.purgeWindowDays !== undefined ||
-      d.theme !== undefined,
-    { message: "no_field" },
-  );
 
 /** Projection camelCase de la ligne (mêmes clés que `/api/health`). */
 const SETTINGS_COLUMNS = {
@@ -49,12 +33,14 @@ settingsRoutes.get("/", async (c) => {
   if (!row) {
     return c.json({ error: "settings_not_found" }, 500);
   }
-  return c.json(row);
+  return c.json(row satisfies SettingsResponse);
 });
 
 /** Mise à jour partielle des réglages. */
 settingsRoutes.patch("/", async (c) => {
-  const parsed = patchSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = settingsPatchSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -73,14 +59,14 @@ settingsRoutes.patch("/", async (c) => {
   if (parsed.data.theme !== undefined) set.theme = parsed.data.theme;
 
   const db = getDb(c.env.DB);
-  const updated = await db
+  const [row] = await db
     .update(settings)
     .set(set)
     .where(eq(settings.id, 1))
     .returning(SETTINGS_COLUMNS);
 
-  if (updated.length === 0) {
+  if (!row) {
     return c.json({ error: "settings_not_found" }, 500);
   }
-  return c.json(updated[0]);
+  return c.json(row satisfies SettingsResponse);
 });

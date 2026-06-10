@@ -1,3 +1,13 @@
+import type {
+  DiscoveredFeed,
+  Feed,
+  FeedsResponse,
+  FeedUnsubscribedResponse,
+  FeedUpdatedResponse,
+  OkResponse,
+  SubscribeCandidatesResponse,
+  SubscribeSubscribedResponse,
+} from "@boreas/api-contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { queryOptions } from "@tanstack/react-query";
 import { apiFetch } from "./api";
@@ -10,21 +20,9 @@ import {
 /**
  * Santé d'un Feed côté SPA (#11). `status` pilote le badge « en erreur » de la
  * sidebar ; `lastError` alimente l'info-bulle (code brut, ex. `http_404`).
+ * Contrat wire partagé (`@boreas/api-contracts`).
  */
-export interface Feed {
-  id: string;
-  url: string;
-  title: string | null;
-  status: "ok" | "error";
-  lastError: string | null;
-  lastCheckAt: string | null;
-  /** Folder de rattachement (≤ 1), ou `null` si non classé (#13). */
-  folderId: string | null;
-}
-
-interface FeedsResponse {
-  feeds: Feed[];
-}
+export type { DiscoveredFeed, Feed };
 
 /** Clé du cache de la liste des feeds. */
 export const FEEDS_LIST_KEY = ["feeds", "list"] as const;
@@ -49,19 +47,11 @@ export function feedLabel(feed: Pick<Feed, "title" | "url">): string {
 }
 
 /**
- * Flux candidat découvert à partir d'une URL de site (#12). Miroir du type
- * `DiscoveredFeed` côté API ; alimente le sélecteur multi-flux.
- */
-export interface DiscoveredFeed {
-  url: string;
-  title: string | null;
-  type: "rss" | "atom";
-}
-
-/**
  * Issue de `POST /api/feeds` (#12) : soit l'abonnement a réussi (URL de flux ou
  * URL de site mono-flux), soit le site expose plusieurs flux et il faut en
- * choisir un (`candidates`). Discriminé sur la forme du corps 2xx.
+ * choisir un (`candidates`). **Modèle de vue local** (discriminé sur `kind`),
+ * distinct des deux réponses wire (`SubscribeSubscribedResponse` /
+ * `SubscribeCandidatesResponse`) qu'il fusionne pour le composant.
  */
 export type SubscribeOutcome =
   | {
@@ -71,14 +61,6 @@ export type SubscribeOutcome =
     }
   | { kind: "candidates"; candidates: DiscoveredFeed[] };
 
-interface SubscribedBody {
-  feed: { id: string; url: string; title: string | null };
-  articleCount: number;
-}
-interface CandidatesBody {
-  candidates: DiscoveredFeed[];
-}
-
 /**
  * Soumet une URL (de flux **ou** de site) à `POST /api/feeds`. Le backend tente
  * l'abonnement direct puis, à défaut, l'auto-découverte : il renvoie soit le
@@ -86,7 +68,9 @@ interface CandidatesBody {
  * deux par la présence de `candidates` dans le corps.
  */
 export async function submitFeedUrl(url: string): Promise<SubscribeOutcome> {
-  const body = await apiFetch<SubscribedBody | CandidatesBody>("/feeds", {
+  const body = await apiFetch<
+    SubscribeSubscribedResponse | SubscribeCandidatesResponse
+  >("/feeds", {
     method: "POST",
     body: JSON.stringify({ url }),
   });
@@ -134,7 +118,7 @@ export interface UpdateFeedInput {
 export function updateFeedMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: ({ id, ...patch }: UpdateFeedInput) =>
-      apiFetch<{ id: string }>(`/feeds/${id}`, {
+      apiFetch<FeedUpdatedResponse>(`/feeds/${id}`, {
         method: "PATCH",
         body: JSON.stringify(patch),
       }),
@@ -163,7 +147,7 @@ export function invalidateAfterFeedLifecycle(queryClient: QueryClient): void {
 export function unsubscribeFeedMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: (id: string) =>
-      apiFetch<{ id: string; unsubscribed: true }>(`/feeds/${id}/unsubscribe`, {
+      apiFetch<FeedUnsubscribedResponse>(`/feeds/${id}/unsubscribe`, {
         method: "POST",
       }),
     onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
@@ -178,7 +162,7 @@ export function unsubscribeFeedMutationOptions(queryClient: QueryClient) {
 export function deleteFeedMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: (id: string) =>
-      apiFetch<{ ok: true }>(`/feeds/${id}`, { method: "DELETE" }),
+      apiFetch<OkResponse>(`/feeds/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
   };
 }

@@ -1,18 +1,14 @@
+import type { SettingsResponse } from "@boreas/api-contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { queryOptions } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import type { ThemePreference } from "./theme";
 
 /**
  * Réglages globaux (#18). `refreshIntervalMin` pilote la cadence du Cron (#10),
  * `purgeWindowDays` le seuil de rétention (#15), `theme` l'apparence du SPA (#4).
- * Miroir de la réponse `GET /api/settings` (clés camelCase).
+ * Contrat wire partagé (`@boreas/api-contracts`).
  */
-export interface Settings {
-  refreshIntervalMin: number;
-  purgeWindowDays: number;
-  theme: ThemePreference;
-}
+export type Settings = SettingsResponse;
 
 /** Clé du cache des réglages. */
 export const SETTINGS_QUERY_KEY = ["settings"] as const;

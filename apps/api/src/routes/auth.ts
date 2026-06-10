@@ -1,8 +1,12 @@
+import {
+  type AuthRequestResponse,
+  authRequestSchema,
+  type SessionResponse,
+} from "@boreas/api-contracts";
 import { authTokens, getDb, settings } from "@boreas/shared";
 import { issueMagicToken, verifyMagicToken } from "@boreas/shared/crypto";
 import { and, eq, gt } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { Env } from "../env";
 import { sendMagicLink } from "../lib/email";
 import {
@@ -10,8 +14,6 @@ import {
   hasValidSession,
   setSessionCookie,
 } from "../lib/session";
-
-const requestSchema = z.object({ email: z.string().email() });
 
 /**
  * Routes d'auth magic link (montées sur /api/auth). Toutes publiques :
@@ -24,7 +26,9 @@ export const authRoutes = new Hono<{ Bindings: Env }>();
  * (anti-énumération) : un lien n'est réellement émis que pour l'`allowed_email`.
  */
 authRoutes.post("/request", async (c) => {
-  const parsed = requestSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = authRequestSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -60,7 +64,7 @@ authRoutes.post("/request", async (c) => {
   }
 
   // Réponse générique identique quelle que soit l'adresse (anti-énumération).
-  return c.json({ status: "ok" });
+  return c.json({ status: "ok" } satisfies AuthRequestResponse);
 });
 
 /**
@@ -105,7 +109,7 @@ authRoutes.post("/logout", (c) => {
 /** État de session pour le guard du SPA. */
 authRoutes.get("/session", (c) => {
   if (!hasValidSession(c, c.env.HMAC_SECRET)) {
-    return c.json({ authenticated: false }, 401);
+    return c.json({ authenticated: false } satisfies SessionResponse, 401);
   }
-  return c.json({ authenticated: true });
+  return c.json({ authenticated: true } satisfies SessionResponse);
 });

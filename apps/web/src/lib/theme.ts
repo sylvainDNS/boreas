@@ -3,8 +3,13 @@
 // démarrage) ; la synchro avec settings.theme (serveur) est faite par `useTheme`
 // au changement, et réconciliée serveur→local au chargement de l'écran réglages (#18).
 
-/** Préférence choisie par l'utilisateur. Aligné sur l'enum `settings.theme` (D1). */
-export type ThemePreference = "light" | "dark" | "system";
+import type { Theme } from "@boreas/api-contracts";
+
+/**
+ * Préférence choisie par l'utilisateur. Ré-export de l'enum partagé `Theme`
+ * (source de vérité unique, `@boreas/api-contracts`), aligné sur `settings.theme`.
+ */
+export type ThemePreference = Theme;
 /** Thème effectivement appliqué (jamais "system"). */
 type ResolvedTheme = "light" | "dark";
 

@@ -1,3 +1,7 @@
+import {
+  type OpmlImportResponse,
+  opmlImportSchema,
+} from "@boreas/api-contracts";
 import { buildOpml, parseOpml } from "@boreas/opml";
 import {
   chunk,
@@ -11,10 +15,7 @@ import {
 } from "@boreas/shared";
 import { inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { Env } from "../env";
-
-const importSchema = z.object({ opml: z.string().min(1) });
 
 // Tailles de lot des écritures groupées, dérivées des limites D1 centralisées
 // (`@boreas/shared`), en tenant compte du nombre de colonnes/paramètres par ligne.
@@ -51,7 +52,9 @@ export const opmlRoutes = new Hono<{ Bindings: Env }>();
  * insérées via `returning`).
  */
 opmlRoutes.post("/import", async (c) => {
-  const parsed = importSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = opmlImportSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -65,7 +68,7 @@ opmlRoutes.post("/import", async (c) => {
       reactivated: 0,
       skipped: 0,
       foldersCreated: 0,
-    });
+    } satisfies OpmlImportResponse);
   }
 
   // 1. Résolution des Folders en lot : réutilise les homonymes existants
@@ -191,7 +194,12 @@ opmlRoutes.post("/import", async (c) => {
 
   await enqueueFeedIds(c.env.INGESTION_QUEUE, toBackfill);
 
-  return c.json({ imported, reactivated, skipped, foldersCreated });
+  return c.json({
+    imported,
+    reactivated,
+    skipped,
+    foldersCreated,
+  } satisfies OpmlImportResponse);
 });
 
 /**

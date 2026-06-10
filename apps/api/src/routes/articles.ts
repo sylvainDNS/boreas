@@ -1,3 +1,13 @@
+import {
+  type ArticleCountsResponse,
+  type ArticleDetailResponse,
+  type ArticleListResponse,
+  type ArticlePatchResponse,
+  articleFilterSchema,
+  articlePatchSchema,
+  type MarkReadResponse,
+  markReadRequestSchema,
+} from "@boreas/api-contracts";
 import { articles, feeds, getDb } from "@boreas/shared";
 import {
   and,
@@ -11,7 +21,6 @@ import {
   or,
 } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { Env } from "../env";
 
 /** Taille de page de la liste « Tous les non-lus ». */
@@ -32,10 +41,13 @@ export const articlesRoutes = new Hono<{ Bindings: Env }>();
  * sauts/doublons d'une pagination par offset quand de nouveaux articles arrivent.
  */
 articlesRoutes.get("/", async (c) => {
-  const filter = c.req.query("filter") ?? "unread";
-  if (filter !== "unread" && filter !== "all" && filter !== "saved") {
+  const filterResult = articleFilterSchema.safeParse(
+    c.req.query("filter") ?? "unread",
+  );
+  if (!filterResult.success) {
     return c.json({ error: "unsupported_filter" }, 400);
   }
+  const filter = filterResult.data;
 
   const cursor = decodeCursor(c.req.query("cursor"));
   const keyset = cursor
@@ -113,7 +125,7 @@ articlesRoutes.get("/", async (c) => {
       saved: row.saved,
     })),
     nextCursor,
-  });
+  } satisfies ArticleListResponse);
 });
 
 /**
@@ -155,14 +167,20 @@ articlesRoutes.get("/counts", async (c) => {
   ]);
 
   const total = byFeed.reduce((sum, row) => sum + row.count, 0);
-  return c.json({ total, byFeed, byFolder });
+  // `isNotNull(feeds.folder_id)` garantit le non-null au runtime ; drizzle infère
+  // pourtant `string | null`. On restreint explicitement (le contrat wire impose
+  // un `folderId` non-null) — seul point du fichier où la dérive type/runtime est
+  // résolue à la main plutôt que par `satisfies`.
+  const byFolderResult = byFolder.map((row) => ({
+    folderId: row.folderId as string,
+    count: row.count,
+  }));
+  return c.json({
+    total,
+    byFeed,
+    byFolder: byFolderResult,
+  } satisfies ArticleCountsResponse);
 });
-
-const patchSchema = z
-  .object({ read: z.boolean().optional(), saved: z.boolean().optional() })
-  .refine((d) => d.read !== undefined || d.saved !== undefined, {
-    message: "no_field",
-  });
 
 /**
  * Bascule manuelle de l'état d'un Article (#8/#9) : `read` (lu↔non-lu) et/ou
@@ -170,7 +188,9 @@ const patchSchema = z
  * doit être fourni ; la réponse n'écho que les champs effectivement modifiés.
  */
 articlesRoutes.patch("/:id", async (c) => {
-  const parsed = patchSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = articlePatchSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -189,14 +209,8 @@ articlesRoutes.patch("/:id", async (c) => {
   if (updated.length === 0) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.json({ id, ...parsed.data });
+  return c.json({ id, ...parsed.data } satisfies ArticlePatchResponse);
 });
-
-const markReadSchema = z.discriminatedUnion("scope", [
-  z.object({ scope: z.literal("global") }),
-  z.object({ scope: z.literal("feed"), feedId: z.string().min(1) }),
-  z.object({ scope: z.literal("folder"), folderId: z.string().min(1) }),
-]);
 
 /**
  * « Tout marquer lu » (#8) au niveau global, d'un Feed ou d'un Folder (#13). La
@@ -205,7 +219,9 @@ const markReadSchema = z.discriminatedUnion("scope", [
  * nombre réel d'articles basculés.
  */
 articlesRoutes.post("/mark-read", async (c) => {
-  const parsed = markReadSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = markReadRequestSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -230,7 +246,7 @@ articlesRoutes.post("/mark-read", async (c) => {
     .where(and(eq(articles.read, false), scopeFilter))
     .returning({ id: articles.id });
 
-  return c.json({ updated: updated.length });
+  return c.json({ updated: updated.length } satisfies MarkReadResponse);
 });
 
 /**
@@ -288,7 +304,7 @@ articlesRoutes.get("/:id", async (c) => {
     link: row.link,
     publishedAt: row.publishedAt,
     content,
-  });
+  } satisfies ArticleDetailResponse);
 });
 
 interface Cursor {

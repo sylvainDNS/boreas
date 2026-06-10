@@ -8,6 +8,7 @@
     "build": "wrangler deploy --dry-run --config wrangler.jsonc"
   },
   "dependencies": {
+    "@boreas/api-contracts": "workspace:*",
     "@boreas/content-extractor": "workspace:*",
     "@boreas/html-sanitizer": "workspace:*",
     "@boreas/opml": "workspace:*",

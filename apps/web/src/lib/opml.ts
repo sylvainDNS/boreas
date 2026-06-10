@@ -1,3 +1,4 @@
+import type { OpmlImportResponse } from "@boreas/api-contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import { invalidateAfterFeedLifecycle } from "./feeds";
@@ -44,12 +45,7 @@ export async function downloadOpmlExport(): Promise<void> {
 }
 
 /** Récapitulatif d'un import OPML, renvoyé par `POST /api/opml/import` (#17). */
-export interface OpmlImportResult {
-  imported: number;
-  reactivated: number;
-  skipped: number;
-  foldersCreated: number;
-}
+export type OpmlImportResult = OpmlImportResponse;
 
 /**
  * Mutation d'import OPML (#17). Lit le fichier choisi côté client (`file.text()`)
@@ -62,7 +58,7 @@ export function importOpmlMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: async (file: File): Promise<OpmlImportResult> => {
       const opml = await file.text();
-      return apiFetch<OpmlImportResult>("/opml/import", {
+      return apiFetch<OpmlImportResponse>("/opml/import", {
         method: "POST",
         body: JSON.stringify({ opml }),
       });

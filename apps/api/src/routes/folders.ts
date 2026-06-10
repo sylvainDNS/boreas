@@ -1,11 +1,14 @@
+import {
+  type FolderCreatedResponse,
+  type FolderRenamedResponse,
+  type FoldersResponse,
+  folderNameSchema,
+  type OkResponse,
+} from "@boreas/api-contracts";
 import { feeds, folders, getDb } from "@boreas/shared";
 import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { Env } from "../env";
-
-/** Nom de Folder : non vide après trim (les espaces de bord sont rognés). */
-const nameSchema = z.object({ name: z.string().trim().min(1) });
 
 /**
  * Routes Folder (montées sur /api/folders), sous le middleware de session.
@@ -24,12 +27,14 @@ foldersRoutes.get("/", async (c) => {
     .from(folders)
     .orderBy(asc(folders.name));
 
-  return c.json({ folders: rows });
+  return c.json({ folders: rows } satisfies FoldersResponse);
 });
 
 /** Création d'un Folder. Le nom n'a pas à être unique. */
 foldersRoutes.post("/", async (c) => {
-  const parsed = nameSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = folderNameSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -39,12 +44,14 @@ foldersRoutes.post("/", async (c) => {
   const db = getDb(c.env.DB);
   await db.insert(folders).values({ id, name });
 
-  return c.json({ folder: { id, name } }, 201);
+  return c.json({ folder: { id, name } } satisfies FolderCreatedResponse, 201);
 });
 
 /** Renommage d'un Folder. 404 si l'id est inconnu. */
 foldersRoutes.patch("/:id", async (c) => {
-  const parsed = nameSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = folderNameSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
   if (!parsed.success) {
     return c.json({ error: "invalid_request" }, 400);
   }
@@ -60,7 +67,7 @@ foldersRoutes.patch("/:id", async (c) => {
   if (updated.length === 0) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.json({ id, name: parsed.data.name });
+  return c.json({ id, name: parsed.data.name } satisfies FolderRenamedResponse);
 });
 
 /**
@@ -86,5 +93,5 @@ foldersRoutes.delete("/:id", async (c) => {
   if (deleted.length === 0) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.json({ ok: true });
+  return c.json({ ok: true } satisfies OkResponse);
 });

@@ -1,4 +1,16 @@
 import {
+  type DiscoverResponse,
+  type FeedRefreshResponse,
+  type FeedsResponse,
+  type FeedUnsubscribedResponse,
+  type FeedUpdatedResponse,
+  type OkResponse,
+  type SubscribeCandidatesResponse,
+  type SubscribeSubscribedResponse,
+  subscribeSchema,
+  updateFeedSchema,
+} from "@boreas/api-contracts";
+import {
   articles,
   buildConditionalHeaders,
   type Db,
@@ -16,10 +28,7 @@ import {
 } from "@boreas/shared";
 import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { Env } from "../env";
-
-const subscribeSchema = z.object({ url: z.string().url() });
 
 /**
  * Issue d'une tentative d'abonnement à une URL de flux : succès (Feed créé +
@@ -225,7 +234,7 @@ feedsRoutes.get("/", async (c) => {
       // Folder de rattachement (null = non classé). La sidebar (#13) regroupe.
       folderId: row.folderId,
     })),
-  });
+  } satisfies FeedsResponse);
 });
 
 // Codes d'échec d'abonnement → statut HTTP.
@@ -263,7 +272,10 @@ feedsRoutes.post("/", async (c) => {
   const direct = await subscribeToFeedUrl(url, db, c.env);
   if (direct.ok) {
     return c.json(
-      { feed: direct.feed, articleCount: direct.articleCount },
+      {
+        feed: direct.feed,
+        articleCount: direct.articleCount,
+      } satisfies SubscribeSubscribedResponse,
       201,
     );
   }
@@ -290,12 +302,18 @@ feedsRoutes.post("/", async (c) => {
   if (candidates.length === 1 && candidates[0]) {
     const sub = await subscribeToFeedUrl(candidates[0].url, db, c.env);
     if (sub.ok) {
-      return c.json({ feed: sub.feed, articleCount: sub.articleCount }, 201);
+      return c.json(
+        {
+          feed: sub.feed,
+          articleCount: sub.articleCount,
+        } satisfies SubscribeSubscribedResponse,
+        201,
+      );
     }
     return c.json({ error: sub.error }, SUBSCRIBE_ERROR_STATUS[sub.error]);
   }
 
-  return c.json({ candidates }, 200);
+  return c.json({ candidates } satisfies SubscribeCandidatesResponse, 200);
 });
 
 /**
@@ -314,7 +332,7 @@ feedsRoutes.post("/discover", async (c) => {
   if (!candidates) {
     return c.json({ error: "fetch_failed" }, 502);
   }
-  return c.json({ candidates });
+  return c.json({ candidates } satisfies DiscoverResponse);
 });
 
 /**
@@ -337,20 +355,11 @@ feedsRoutes.post("/:id/refresh", async (c) => {
   }
 
   const result = await ingestFeed(id, db, c.env.BUCKET, c.env.HMAC_SECRET);
-  return c.json({ inserted: result.inserted, status: result.status });
+  return c.json({
+    inserted: result.inserted,
+    status: result.status,
+  } satisfies FeedRefreshResponse);
 });
-
-// Renommage et/ou déplacement de Feed : `title` non vide pour renommer ;
-// `folderId` (uuid) pour assigner un Folder, `null` pour désassigner. Au moins
-// un champ requis (`.refine`) — sinon le PATCH n'aurait rien à faire.
-const updateFeedSchema = z
-  .object({
-    title: z.string().trim().min(1).optional(),
-    folderId: z.string().min(1).nullable().optional(),
-  })
-  .refine((d) => d.title !== undefined || d.folderId !== undefined, {
-    message: "no_field",
-  });
 
 /**
  * Renomme un Feed et/ou le déplace entre Folders (US 12, #13). `folderId: null`
@@ -396,7 +405,7 @@ feedsRoutes.patch("/:id", async (c) => {
   if (updated.length === 0) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.json({ id, ...parsed.data });
+  return c.json({ id, ...parsed.data } satisfies FeedUpdatedResponse);
 });
 
 /**
@@ -426,7 +435,7 @@ feedsRoutes.post("/:id/unsubscribe", async (c) => {
     and(eq(articles.feed_id, id), eq(articles.saved, false)) as SQL,
   );
 
-  return c.json({ id, unsubscribed: true });
+  return c.json({ id, unsubscribed: true } satisfies FeedUnsubscribedResponse);
 });
 
 /**
@@ -452,5 +461,5 @@ feedsRoutes.delete("/:id", async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  return c.json({ ok: true });
+  return c.json({ ok: true } satisfies OkResponse);
 });

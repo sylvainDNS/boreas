@@ -1,3 +1,14 @@
+import type {
+  ArticleCountsResponse,
+  ArticleDetailResponse,
+  ArticleFilter,
+  ArticleListItem,
+  ArticleListResponse,
+  ArticlePatchResponse,
+  MarkReadRequest,
+  MarkReadResponse,
+  RefreshResponse,
+} from "@boreas/api-contracts";
 import {
   infiniteQueryOptions,
   type QueryClient,
@@ -24,26 +35,8 @@ export interface Article {
   saved: boolean;
 }
 
-/** Forme renvoyée par `GET /api/articles`. */
-interface ArticleDto {
-  id: string;
-  feedId: string;
-  feedName: string;
-  title: string | null;
-  summary: string | null;
-  link: string | null;
-  publishedAt: string | null;
-  read: boolean;
-  saved: boolean;
-}
-
-interface ArticlesPage {
-  articles: ArticleDto[];
-  nextCursor: string | null;
-}
-
-/** Convertit le DTO API en modèle de vue (libellé relatif, état non-lu). */
-export function toArticle(dto: ArticleDto): Article {
+/** Convertit l'item wire en modèle de vue (libellé relatif, état non-lu). */
+export function toArticle(dto: ArticleListItem): Article {
   return {
     id: dto.id,
     feedId: dto.feedId,
@@ -58,15 +51,7 @@ export function toArticle(dto: ArticleDto): Article {
 }
 
 /** Forme renvoyée par `GET /api/articles/:id` (contenu plein du lecteur). */
-export interface ArticleDetail {
-  id: string;
-  feedName: string;
-  title: string | null;
-  link: string | null;
-  publishedAt: string | null;
-  /** HTML extrait + sanitizé côté serveur (ADR 0007), ou null si indisponible. */
-  content: string | null;
-}
+export type ArticleDetail = ArticleDetailResponse;
 
 /**
  * Query du contenu plein d'un Article. Le serveur **marque l'Article Read** au
@@ -81,9 +66,9 @@ export function articleDetailQueryOptions(id: string) {
 
 /**
  * Filtre de la liste : non-lus seuls, lus + non-lus (#8, US 20), ou Saved
- * seuls (#9, vue Saved).
+ * seuls (#9, vue Saved). Contrat wire partagé (`@boreas/api-contracts`).
  */
-export type ArticleFilter = "all" | "unread" | "saved";
+export type { ArticleFilter };
 
 /** Préfixe de clé commun à toutes les listes paginées (tous filtres confondus). */
 export const ARTICLES_LIST_KEY = ["articles", "list"] as const;
@@ -119,7 +104,7 @@ export function listArticlesInfiniteQueryOptions(
       if (feedId) params.set("feedId", feedId);
       if (folderId) params.set("folderId", folderId);
       if (pageParam) params.set("cursor", pageParam);
-      return apiFetch<ArticlesPage>(`/articles?${params.toString()}`);
+      return apiFetch<ArticleListResponse>(`/articles?${params.toString()}`);
     },
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     refetchInterval: POLL_INTERVAL_MS,
@@ -127,12 +112,7 @@ export function listArticlesInfiniteQueryOptions(
 }
 
 /** Compteurs de non-lus exacts : total + agrégat par Feed (#8) et par Folder (#13). */
-export interface ArticleCounts {
-  total: number;
-  byFeed: { feedId: string; count: number }[];
-  /** Non-lus par Folder ; les Feeds non classés en sont absents. */
-  byFolder: { folderId: string; count: number }[];
-}
+export type ArticleCounts = ArticleCountsResponse;
 
 export function articleCountsQueryOptions() {
   return queryOptions({
@@ -150,8 +130,7 @@ export function articleCountsQueryOptions() {
  */
 export function refreshMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: () =>
-      apiFetch<{ enqueued: number }>("/refresh", { method: "POST" }),
+    mutationFn: () => apiFetch<RefreshResponse>("/refresh", { method: "POST" }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
@@ -168,20 +147,21 @@ export function refreshMutationOptions(queryClient: QueryClient) {
 function mapArticlesInListCaches(
   queryClient: QueryClient,
   queryKey: readonly unknown[],
-  mapArticles: (articles: ArticleDto[]) => ArticleDto[],
+  mapArticles: (articles: ArticleListItem[]) => ArticleListItem[],
 ): void {
-  queryClient.setQueriesData<{ pages: ArticlesPage[]; pageParams: unknown[] }>(
-    { queryKey },
-    (prev) =>
-      prev
-        ? {
-            ...prev,
-            pages: prev.pages.map((page) => ({
-              ...page,
-              articles: mapArticles(page.articles),
-            })),
-          }
-        : prev,
+  queryClient.setQueriesData<{
+    pages: ArticleListResponse[];
+    pageParams: unknown[];
+  }>({ queryKey }, (prev) =>
+    prev
+      ? {
+          ...prev,
+          pages: prev.pages.map((page) => ({
+            ...page,
+            articles: mapArticles(page.articles),
+          })),
+        }
+      : prev,
   );
 }
 
@@ -242,7 +222,7 @@ function removeArticleFromSavedCache(
 export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: ({ id, saved }: { id: string; saved: boolean }) =>
-      apiFetch<{ id: string; saved: boolean }>(`/articles/${id}`, {
+      apiFetch<ArticlePatchResponse>(`/articles/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ saved }),
       }),
@@ -276,11 +256,11 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
   };
 }
 
-/** Portée de « Tout marquer lu » : global, un Feed (#8) ou un Folder (#13). */
-export type MarkReadScope =
-  | { scope: "global" }
-  | { scope: "feed"; feedId: string }
-  | { scope: "folder"; folderId: string };
+/**
+ * Portée de « Tout marquer lu » : global, un Feed (#8) ou un Folder (#13).
+ * Contrat wire partagé (`@boreas/api-contracts`).
+ */
+export type MarkReadScope = MarkReadRequest;
 
 /**
  * Options de mutation pour la bascule manuelle Read↔non-lu (`PATCH /articles/:id`).
@@ -289,7 +269,7 @@ export type MarkReadScope =
 export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: ({ id, read }: { id: string; read: boolean }) =>
-      apiFetch<{ id: string; read: boolean }>(`/articles/${id}`, {
+      apiFetch<ArticlePatchResponse>(`/articles/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ read }),
       }),
@@ -325,7 +305,7 @@ export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
 export function markAllReadMutationOptions(queryClient: QueryClient) {
   return {
     mutationFn: (scope: MarkReadScope) =>
-      apiFetch<{ updated: number }>("/articles/mark-read", {
+      apiFetch<MarkReadResponse>("/articles/mark-read", {
         method: "POST",
         body: JSON.stringify(scope),
       }),

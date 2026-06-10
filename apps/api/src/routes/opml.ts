@@ -1,10 +1,13 @@
 import { buildOpml, parseOpml } from "@boreas/opml";
 import {
+  chunk,
   enqueueFeedIds,
   FEED_REACTIVATION_RESET,
   feeds,
   folders,
   getDb,
+  insertChunkSize,
+  whereInChunkSize,
 } from "@boreas/shared";
 import { inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
@@ -13,25 +16,14 @@ import type { Env } from "../env";
 
 const importSchema = z.object({ opml: z.string().min(1) });
 
-// D1 plafonne une requête à 100 variables liées (cf. ingestion.ts). On découpe
-// les écritures groupées en deçà de cette limite, en tenant compte du nombre de
-// colonnes/paramètres posés par ligne.
-const D1_MAX_BOUND_PARAMS = 100;
+// Tailles de lot des écritures groupées, dérivées des limites D1 centralisées
+// (`@boreas/shared`), en tenant compte du nombre de colonnes/paramètres par ligne.
 // INSERT feeds : 4 colonnes par ligne (id, url, title, folder_id).
-const FEED_INSERT_CHUNK = Math.floor((D1_MAX_BOUND_PARAMS - 1) / 4);
+const FEED_INSERT_CHUNK = insertChunkSize(4);
 // INSERT folders : 2 colonnes par ligne (id, name).
-const FOLDER_INSERT_CHUNK = Math.floor((D1_MAX_BOUND_PARAMS - 1) / 2);
-// UPDATE … WHERE id IN (…) : ~8 paramètres pour le `set`, le reste pour les ids.
-const FEED_UPDATE_CHUNK = D1_MAX_BOUND_PARAMS - 16;
-
-/** Découpe un tableau en tranches de taille `size`. */
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    out.push(items.slice(i, i + size));
-  }
-  return out;
-}
+const FOLDER_INSERT_CHUNK = insertChunkSize(2);
+// UPDATE … WHERE id IN (…) : ~16 paramètres réservés au `set`, le reste pour les ids.
+const FEED_UPDATE_CHUNK = whereInChunkSize(16);
 
 /**
  * Routes OPML (montées sur /api/opml), sous le middleware de session. Permettent
@@ -114,7 +106,7 @@ opmlRoutes.post("/import", async (c) => {
   >();
   for (const group of chunk(
     entries.map((e) => e.url),
-    D1_MAX_BOUND_PARAMS - 1,
+    whereInChunkSize(1),
   )) {
     const rows = await db
       .select({

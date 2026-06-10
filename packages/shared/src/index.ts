@@ -1,5 +1,12 @@
 export type { ArticleItem } from "./article-identity";
 export { articleKey } from "./article-identity";
+export {
+  chunk,
+  D1_MAX_BOUND_PARAMS,
+  insertChunkSize,
+  R2_DELETE_CHUNK,
+  whereInChunkSize,
+} from "./batching";
 export type { Db } from "./db/index";
 export {
   articles,

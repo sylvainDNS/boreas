@@ -2,6 +2,7 @@ import { extractArticle } from "@boreas/content-extractor";
 import { sanitizeHtml } from "@boreas/html-sanitizer";
 import { and, eq, isNull, lte, or, type SQL } from "drizzle-orm";
 import { articleKey } from "./article-identity";
+import { chunk, insertChunkSize, R2_DELETE_CHUNK } from "./batching";
 import { signImageUrl } from "./crypto";
 import type { Db } from "./db";
 import { articles, feeds, settings } from "./db";
@@ -9,15 +10,12 @@ import type { ParsedItem } from "./feed-parser";
 import { parseFeed } from "./feed-parser";
 import { sqlUtcNow } from "./timestamp";
 
-// D1 plafonne une requête à 100 variables liées. On dérive la taille de lot du
-// nombre de colonnes posées par ligne (avec marge) pour qu'elle s'ajuste
-// automatiquement si une colonne est ajoutée à `articles`, au lieu d'un nombre
-// magique qui dépasserait la limite silencieusement.
+// On dérive la taille de lot d'insertion du nombre de colonnes posées par ligne
+// (limites centralisées dans `batching.ts`) pour qu'elle s'ajuste automatiquement
+// si une colonne est ajoutée à `articles`, au lieu d'un nombre magique qui
+// dépasserait la limite silencieusement.
 const ARTICLE_INSERT_COLUMNS = 12;
-const D1_MAX_BOUND_PARAMS = 100;
-const INSERT_CHUNK = Math.floor(
-  (D1_MAX_BOUND_PARAMS - 1) / ARTICLE_INSERT_COLUMNS,
-);
+const INSERT_CHUNK = insertChunkSize(ARTICLE_INSERT_COLUMNS);
 
 // Concurrence max de l'extraction+sanitization+put R2 par lot. Chaque item
 // déclenche un parse linkedom (CPU) + un put R2 (sous-requête) ; un flux peut
@@ -430,10 +428,6 @@ export async function getDueFeedIds(
   return rows.map((r) => r.id);
 }
 
-// R2 plafonne une suppression groupée à 1000 clés par appel : on découpe la
-// liste des objets à effacer en lots de cette taille.
-const R2_DELETE_CHUNK = 1000;
-
 /**
  * Supprime des Articles (et leurs objets R2 de contenu) en respectant la
  * cohérence des deux stores (ADR 0004) : on efface d'abord les objets R2
@@ -459,9 +453,9 @@ export async function deleteArticlesAndContent(
   const keys = rows
     .map((r) => r.contentKey)
     .filter((k): k is string => k !== null);
-  for (let i = 0; i < keys.length; i += R2_DELETE_CHUNK) {
+  for (const group of chunk(keys, R2_DELETE_CHUNK)) {
     try {
-      await bucket.delete(keys.slice(i, i + R2_DELETE_CHUNK));
+      await bucket.delete(group);
     } catch (err) {
       console.error("[ingestion] suppression d'objets R2 échouée", err);
     }
@@ -551,10 +545,10 @@ async function upsertNewArticles(
   // onConflictDoNothing sur (feed_id, article_key) : idempotent et sans reset du
   // Read d'un Article existant. `returning` compte les insertions réelles.
   let count = 0;
-  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+  for (const group of chunk(rows, INSERT_CHUNK)) {
     const result = await db
       .insert(articles)
-      .values(rows.slice(i, i + INSERT_CHUNK))
+      .values(group)
       .onConflictDoNothing()
       .returning({ id: articles.id });
     count += result.length;

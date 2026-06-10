@@ -1,4 +1,5 @@
 import { and, eq, isNotNull, lt, type SQL } from "drizzle-orm";
+import { chunk, R2_DELETE_CHUNK } from "./batching";
 import type { Db } from "./db";
 import { articles, settings } from "./db";
 import { deleteArticlesAndContent } from "./ingestion";
@@ -24,9 +25,6 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // Les images proxifiées (`images/{hash}`, ADR 0009) arriveront avec #16 ; leur GC
 // fin (comptage de références) est différé à cette issue.
 const CONTENT_PREFIX = "articles/";
-
-// R2 plafonne une suppression groupée à 1000 clés par appel.
-const R2_DELETE_CHUNK = 1000;
 
 // Période de grâce du balayage : un objet uploadé il y a moins d'1 h n'est jamais
 // considéré orphelin. L'ingestion écrit l'objet R2 **avant** d'insérer la ligne D1
@@ -115,9 +113,9 @@ export async function sweepOrphanContent(
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);
 
-  for (let i = 0; i < orphans.length; i += R2_DELETE_CHUNK) {
+  for (const group of chunk(orphans, R2_DELETE_CHUNK)) {
     try {
-      await bucket.delete(orphans.slice(i, i + R2_DELETE_CHUNK));
+      await bucket.delete(group);
     } catch (err) {
       console.error("[retention] suppression d'orphelins R2 échouée", err);
     }

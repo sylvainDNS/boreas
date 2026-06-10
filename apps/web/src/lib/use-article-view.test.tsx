@@ -6,6 +6,7 @@ import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArticleListView } from "../components/ArticleListView";
+import type { ApiHandlerContext } from "../test/api-mock";
 import { stubApi } from "../test/api-mock";
 import { createAppWrapper } from "../test/render";
 import { apiFetch } from "./api";
@@ -61,7 +62,7 @@ describe("useArticleView", () => {
   it("scope all : titre, filtre, compteur, toggle showRead → filter=unread", async () => {
     const urls: string[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }) => {
+      "GET /articles": ({ url }: ApiHandlerContext) => {
         urls.push(url);
         return page([item("a1")]);
       },
@@ -96,11 +97,11 @@ describe("useArticleView", () => {
     stubApi(mockedFetch, {
       "GET /articles": page([item("a1")]),
       "GET /articles/counts": emptyCounts,
-      "POST /refresh": ({ url }) => {
+      "POST /refresh": ({ url }: ApiHandlerContext) => {
         calls.push({ path: url, body: undefined });
         return { enqueued: 1 };
       },
-      "POST /articles/mark-read": ({ body, url }) => {
+      "POST /articles/mark-read": ({ body, url }: ApiHandlerContext) => {
         calls.push({ path: url, body });
         return { updated: 1 };
       },
@@ -128,7 +129,7 @@ describe("useArticleView", () => {
     const urls: string[] = [];
     const markBodies: unknown[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }) => {
+      "GET /articles": ({ url }: ApiHandlerContext) => {
         urls.push(url);
         return page([item("a1")]);
       },
@@ -144,7 +145,7 @@ describe("useArticleView", () => {
           },
         ],
       },
-      "POST /articles/mark-read": ({ body }) => {
+      "POST /articles/mark-read": ({ body }: ApiHandlerContext) => {
         markBodies.push(body);
         return { updated: 2 };
       },
@@ -186,7 +187,7 @@ describe("useArticleView", () => {
     const urls: string[] = [];
     const markBodies: unknown[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }) => {
+      "GET /articles": ({ url }: ApiHandlerContext) => {
         urls.push(url);
         return page([item("a1")]);
       },
@@ -196,7 +197,7 @@ describe("useArticleView", () => {
         byFeed: [],
         byFolder: [{ folderId: "fo1", count: 4 }],
       } satisfies ArticleCountsResponse,
-      "POST /articles/mark-read": ({ body }) => {
+      "POST /articles/mark-read": ({ body }: ApiHandlerContext) => {
         markBodies.push(body);
         return { updated: 4 };
       },
@@ -238,7 +239,7 @@ describe("useArticleView", () => {
   it("scope saved : filter=saved, pas de toggleRead/markAllRead/showRead", async () => {
     const urls: string[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }) => {
+      "GET /articles": ({ url }: ApiHandlerContext) => {
         urls.push(url);
         return page([item("s1", { saved: true })]);
       },
@@ -260,7 +261,7 @@ describe("useArticleView", () => {
   it("pagination : onEndReached charge la page suivante (cursor)", async () => {
     const urls: string[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }) => {
+      "GET /articles": ({ url }: ApiHandlerContext) => {
         urls.push(url);
         if (url.includes("cursor=c1")) return page([item("a2")]);
         return page([item("a1")], "c1");
@@ -285,7 +286,7 @@ describe("useArticleView", () => {
     stubApi(mockedFetch, {
       "GET /articles": () =>
         page([...saved].map((id) => item(id, { saved: true }))),
-      "PATCH /articles/:id": ({ params, body }) => {
+      "PATCH /articles/:id": ({ params, body }: ApiHandlerContext) => {
         const patch = body as { saved?: boolean };
         if (patch.saved === false) saved.delete(params.id);
         return { id: params.id, ...patch };

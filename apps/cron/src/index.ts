@@ -6,11 +6,7 @@
  *
  * Tester le scheduled localement : wrangler dev --config wrangler.jsonc --test-scheduled
  */
-import {
-  getDb,
-  type IngestionMessage,
-  ingestFeed,
-} from "@boreas/shared";
+import { getDb, type IngestionMessage, ingestFeed } from "@boreas/shared";
 import { processIngestionBatch, runScheduledTick } from "./consumer";
 
 interface Env {

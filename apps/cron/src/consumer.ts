@@ -5,6 +5,8 @@
  * son traitement, succès comme échec — un Feed qui échoue est retenté au prochain
  * tick via `next_check_at` + backoff exponentiel (#11), pas via les retries Queue.
  */
+
+import type { Db } from "@boreas/shared";
 import {
   enqueueFeedIds,
   getDueFeedIds,
@@ -12,7 +14,6 @@ import {
   type IngestResult,
   runRetention,
 } from "@boreas/shared";
-import type { Db } from "@boreas/shared";
 
 /**
  * Sous-type structurel de `Message<T>` Cloudflare réduit aux deux membres dont

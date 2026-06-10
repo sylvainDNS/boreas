@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { type IngestResult, getDb } from "@boreas/shared";
+import { getDb, type IngestResult } from "@boreas/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AckableMessage,

@@ -6,6 +6,7 @@ import {
   type FeedUpdatedResponse,
   type OkResponse,
   type SubscribeCandidatesResponse,
+  type SubscribeErrorCode,
   type SubscribeSubscribedResponse,
   subscribeSchema,
   updateFeedSchema,
@@ -43,7 +44,7 @@ type SubscribeOutcome =
     }
   | {
       ok: false;
-      error: "already_subscribed" | "invalid_feed" | "fetch_failed";
+      error: SubscribeErrorCode;
     };
 
 /**
@@ -237,12 +238,14 @@ feedsRoutes.get("/", async (c) => {
   } satisfies FeedsResponse);
 });
 
-// Codes d'échec d'abonnement → statut HTTP.
+// Codes d'échec d'abonnement → statut HTTP. `satisfies Record<SubscribeErrorCode>`
+// lie cette table à l'enum du contrat : ajouter un code d'erreur sans son statut
+// (ou inversement) casse au typecheck.
 const SUBSCRIBE_ERROR_STATUS = {
   already_subscribed: 409,
   invalid_feed: 422,
   fetch_failed: 502,
-} as const;
+} as const satisfies Record<SubscribeErrorCode, number>;
 
 /**
  * Abonnement par **URL de flux** ou **URL de site** (auto-découverte, #12).

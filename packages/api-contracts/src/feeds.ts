@@ -74,11 +74,13 @@ export type SubscribeCandidatesResponse = z.infer<
   typeof subscribeCandidatesResponseSchema
 >;
 
-/** `POST /api/feeds/discover` — auto-découverte sans abonnement (#12). */
-export const discoverResponseSchema = z.object({
-  candidates: z.array(discoveredFeedSchema),
-});
-export type DiscoverResponse = z.infer<typeof discoverResponseSchema>;
+/**
+ * `POST /api/feeds/discover` — auto-découverte sans abonnement (#12). Même forme
+ * que la réponse multi-flux de `POST /api/feeds` : on réutilise son schéma plutôt
+ * que d'en maintenir une copie identique.
+ */
+export const discoverResponseSchema = subscribeCandidatesResponseSchema;
+export type DiscoverResponse = SubscribeCandidatesResponse;
 
 /** `POST /api/feeds/:id/refresh` — issue d'un refresh manuel. */
 export const feedRefreshResponseSchema = z.object({

@@ -167,14 +167,14 @@ articlesRoutes.get("/counts", async (c) => {
   ]);
 
   const total = byFeed.reduce((sum, row) => sum + row.count, 0);
-  // `isNotNull(feeds.folder_id)` garantit le non-null au runtime ; drizzle infère
-  // pourtant `string | null`. On restreint explicitement (le contrat wire impose
-  // un `folderId` non-null) — seul point du fichier où la dérive type/runtime est
-  // résolue à la main plutôt que par `satisfies`.
-  const byFolderResult = byFolder.map((row) => ({
-    folderId: row.folderId as string,
-    count: row.count,
-  }));
+  // `isNotNull(feeds.folder_id)` garantit déjà le non-null au runtime ; drizzle
+  // infère pourtant `string | null`. On restreint via un garde de type (et non un
+  // cast) : le contrat wire impose un `folderId` non-null, et si un futur refactor
+  // relâchait le `isNotNull` ci-dessus, les `null` seraient exclus plutôt que
+  // faussement présentés comme des chaînes.
+  const byFolderResult = byFolder.filter(
+    (row): row is { folderId: string; count: number } => row.folderId !== null,
+  );
   return c.json({
     total,
     byFeed,

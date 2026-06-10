@@ -287,9 +287,10 @@ describe("useArticleView", () => {
       "GET /articles": () =>
         page([...saved].map((id) => item(id, { saved: true }))),
       "PATCH /articles/:id": ({ params, body }: ApiHandlerContext) => {
+        const id = params.id as string;
         const patch = body as { saved?: boolean };
-        if (patch.saved === false) saved.delete(params.id);
-        return { id: params.id, ...patch };
+        if (patch.saved === false) saved.delete(id);
+        return { id, ...patch };
       },
     });
 

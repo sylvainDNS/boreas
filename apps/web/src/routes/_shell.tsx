@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppShell } from "../components/AppShell";
 import { sessionQueryOptions } from "../lib/auth";
+import { useServerThemeSync } from "../lib/use-theme";
 
 /** Layout commun à toutes les vues applicatives (pathless). La page /login en est
  *  volontairement exclue : elle n'a ni sidebar ni shell. */
@@ -19,6 +20,9 @@ export const Route = createFileRoute("/_shell")({
 });
 
 function ShellLayout() {
+  // Applique le thème persisté côté serveur dans toute l'app (#18), pas seulement
+  // sur l'écran réglages.
+  useServerThemeSync();
   return (
     <AppShell>
       <Outlet />

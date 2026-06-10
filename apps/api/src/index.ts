@@ -9,6 +9,7 @@ import { foldersRoutes } from "./routes/folders";
 import { imgRoutes } from "./routes/img";
 import { opmlRoutes } from "./routes/opml";
 import { refreshRoutes } from "./routes/refresh";
+import { settingsRoutes } from "./routes/settings";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +38,7 @@ app.route("/api/articles", articlesRoutes);
 app.route("/api/refresh", refreshRoutes);
 app.route("/api/opml", opmlRoutes);
 app.route("/api/img", imgRoutes);
+app.route("/api/settings", settingsRoutes);
 
 /**
  * GET /api/health

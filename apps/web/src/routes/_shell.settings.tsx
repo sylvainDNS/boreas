@@ -1,15 +1,78 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { OpmlImportDialog } from "../components/OpmlImportDialog";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Button } from "../components/ui/Button";
+import { Select } from "../components/ui/Select";
 import { downloadOpmlExport } from "../lib/opml";
+import {
+  settingsQueryOptions,
+  updateSettingsMutationOptions,
+} from "../lib/settings";
 
-/** Réglages (PRD US #49, #50). Câblage à l'API laissé à la tranche #18 ; ici, gabarit. */
+/** Réglages (PRD US #49, #50) câblés à `GET/PATCH /api/settings` (#18). */
 export const Route = createFileRoute("/_shell/settings")({
   component: SettingsView,
 });
+
+/** Presets d'intervalle de rafraîchissement (minutes). */
+const REFRESH_PRESETS = [15, 30, 60, 120];
+/** Presets de fenêtre de purge (jours). */
+const PURGE_PRESETS = [30, 60, 90, 180];
+
+/**
+ * Garantit que la valeur courante figure dans la liste, même hors presets (un
+ * PATCH antérieur a pu poser une valeur sur mesure) : on l'ajoute et on trie.
+ */
+function withCurrent(presets: number[], current: number): number[] {
+  return presets.includes(current)
+    ? presets
+    : [...presets, current].sort((a, b) => a - b);
+}
+
+/**
+ * Menu de presets numériques piloté par l'API. `value` à `undefined` = en cours
+ * de chargement (placeholder, désactivé). Ignore une sélection vide par sécurité
+ * (garde la borne serveur `min(1)` même si `disabled` venait à sauter).
+ */
+function PresetSelect({
+  label,
+  value,
+  presets,
+  unit,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  value: number | undefined;
+  presets: number[];
+  unit: string;
+  disabled: boolean;
+  onSelect: (value: number) => void;
+}) {
+  return (
+    <Select
+      aria-label={label}
+      disabled={disabled}
+      value={value ?? ""}
+      onChange={(e) => {
+        const next = Number(e.target.value);
+        if (Number.isFinite(next) && next > 0) onSelect(next);
+      }}
+    >
+      {value === undefined ? (
+        <option value="">…</option>
+      ) : (
+        withCurrent(presets, value).map((v) => (
+          <option key={v} value={v}>
+            {v} {unit}
+          </option>
+        ))
+      )}
+    </Select>
+  );
+}
 
 function Row({
   label,
@@ -31,9 +94,18 @@ function Row({
   );
 }
 
-function SettingsView() {
+// Exporté pour les tests (le composant de route n'est pas accessible via `Route`).
+export function SettingsView() {
   const [importOpen, setImportOpen] = useState(false);
   const exportMutation = useMutation({ mutationFn: downloadOpmlExport });
+
+  const queryClient = useQueryClient();
+  const settings = useQuery(settingsQueryOptions());
+  const update = useMutation(updateSettingsMutationOptions(queryClient));
+  // La réconciliation thème serveur→local vit dans le shell (`useServerThemeSync`)
+  // pour s'appliquer à toute l'app, pas seulement ici.
+
+  const data = settings.data;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -52,17 +124,29 @@ function SettingsView() {
             label="Intervalle de rafraîchissement"
             hint="Fréquence de récupération des flux en arrière-plan."
           >
-            <span className="rounded-card bg-surface-2 px-3 py-2 text-muted text-sm">
-              30 min
-            </span>
+            <PresetSelect
+              label="Intervalle de rafraîchissement"
+              value={data?.refreshIntervalMin}
+              presets={REFRESH_PRESETS}
+              unit="min"
+              disabled={!data || update.isPending}
+              onSelect={(refreshIntervalMin) =>
+                update.mutate({ refreshIntervalMin })
+              }
+            />
           </Row>
           <Row
             label="Fenêtre de purge"
             hint="Les articles lus et non sauvegardés sont supprimés après ce délai."
           >
-            <span className="rounded-card bg-surface-2 px-3 py-2 text-muted text-sm">
-              60 jours
-            </span>
+            <PresetSelect
+              label="Fenêtre de purge"
+              value={data?.purgeWindowDays}
+              presets={PURGE_PRESETS}
+              unit="jours"
+              disabled={!data || update.isPending}
+              onSelect={(purgeWindowDays) => update.mutate({ purgeWindowDays })}
+            />
           </Row>
           <Row
             label="Import / Export OPML"
@@ -92,10 +176,22 @@ function SettingsView() {
             </div>
           </Row>
         </div>
-        <p className="mt-4 text-muted text-sm">
-          Les réglages persistants seront connectés à l'API dans une tranche
-          ultérieure (#18).
-        </p>
+        {settings.isError && (
+          <p
+            className="mt-4 text-red-600 text-sm dark:text-red-400"
+            role="alert"
+          >
+            Chargement des réglages impossible, réessayez.
+          </p>
+        )}
+        {update.isError && (
+          <p
+            className="mt-4 text-red-600 text-sm dark:text-red-400"
+            role="alert"
+          >
+            Enregistrement impossible, réessayez.
+          </p>
+        )}
       </div>
       <OpmlImportDialog
         open={importOpen}

@@ -1,6 +1,7 @@
 // Gestion du thème clair/sombre du shell.
-// Source de vérité côté client (localStorage) ; la synchro avec settings.theme
-// (serveur) est différée à une tranche ultérieure (#5/#18).
+// localStorage = autorité d'affichage (application instantanée, zéro flash au
+// démarrage) ; la synchro avec settings.theme (serveur) est faite par `useTheme`
+// au changement, et réconciliée serveur→local au chargement de l'écran réglages (#18).
 
 /** Préférence choisie par l'utilisateur. Aligné sur l'enum `settings.theme` (D1). */
 export type ThemePreference = "light" | "dark" | "system";
@@ -10,6 +11,17 @@ type ResolvedTheme = "light" | "dark";
 const STORAGE_KEY = "boreas.theme";
 const prefersDark = () =>
   window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+// Abonnés notifiés à chaque écriture de préférence : permet à tout `useTheme`
+// (via useSyncExternalStore) de rester la seule source de vérité, sans état
+// React dupliqué par instance de ThemeToggle.
+const listeners = new Set<() => void>();
+
+/** S'abonne aux changements de préférence (pour useSyncExternalStore). */
+export function subscribePreference(onChange: () => void): () => void {
+  listeners.add(onChange);
+  return () => listeners.delete(onChange);
+}
 
 export function getStoredPreference(): ThemePreference {
   // localStorage peut lever (Safari « bloquer tous les cookies », mode privé) :
@@ -41,6 +53,9 @@ export function setPreference(pref: ThemePreference): void {
     // Stockage indisponible : le thème s'applique pour la session, sans persistance.
   }
   applyTheme(pref);
+  // Notifie tous les `useTheme` montés (sidebar, réglages) pour qu'ils reflètent
+  // le nouveau choix, quelle que soit l'origine de l'écriture (toggle ou réconciliation).
+  for (const onChange of listeners) onChange();
 }
 
 /** À appeler une fois au démarrage : applique le thème + suit les changements

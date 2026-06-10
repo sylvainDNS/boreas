@@ -1,9 +1,17 @@
-// Gestion du thème clair/sombre du shell.
-// localStorage = autorité d'affichage (application instantanée, zéro flash au
-// démarrage) ; la synchro avec settings.theme (serveur) est faite par `useTheme`
-// au changement, et réconciliée serveur→local au chargement de l'écran réglages (#18).
+// Politique unique du thème clair/sombre du shell. Source de vérité d'affichage =
+// localStorage (application instantanée, zéro flash au démarrage) ; la synchro avec
+// settings.theme (serveur) est faite par `useTheme` au changement (PATCH
+// fire-and-forget) et réconciliée serveur→local au chargement par `useServerThemeSync`
+// (#18). Tout vit ici : primitives pures (testables hors React, importables avant
+// React par `main.tsx` via `initTheme`) en tête, puis les deux hooks.
 
 import type { Theme } from "@boreas/api-contracts";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import {
+  settingsQueryOptions,
+  updateSettingsMutationOptions,
+} from "./settings";
 
 /**
  * Préférence choisie par l'utilisateur. Ré-export de l'enum partagé `Theme`
@@ -73,4 +81,53 @@ export function initTheme(): () => void {
   };
   mq.addEventListener("change", onChange);
   return () => mq.removeEventListener("change", onChange);
+}
+
+/**
+ * Expose la préférence de thème et un setter qui :
+ *  1. persiste + applique localement (localStorage + `data-theme`), instantané et
+ *     sans flash au démarrage — autorité d'affichage ;
+ *  2. propage le choix au serveur (`PATCH /settings`, #18), fire-and-forget : une
+ *     erreur réseau est ignorée car l'affichage est déjà persisté localement.
+ *
+ * La préférence est lue via `useSyncExternalStore` : une seule source de vérité
+ * (localStorage + abonnés) partagée par tous les `ThemeToggle` (sidebar comme
+ * écran réglages), donc tout changement — y compris la réconciliation serveur →
+ * local — met à jour chaque toggle.
+ */
+export function useTheme() {
+  const preference = useSyncExternalStore(
+    subscribePreference,
+    getStoredPreference,
+    getStoredPreference,
+  );
+  const queryClient = useQueryClient();
+  // `mutate` est stable entre rendus (react-query) → callback stable.
+  const { mutate } = useMutation(updateSettingsMutationOptions(queryClient));
+
+  const set = useCallback(
+    (pref: ThemePreference) => {
+      setPreference(pref);
+      mutate({ theme: pref });
+    },
+    [mutate],
+  );
+
+  return { preference, setPreference: set };
+}
+
+/**
+ * Réconcilie le thème serveur → local au niveau de l'app (monté dans le shell) :
+ * sur un appareil neuf dont la préférence locale diffère de celle persistée
+ * côté serveur, applique la valeur serveur partout, pas seulement sur /settings.
+ * `useTheme` reste l'autorité au changement.
+ */
+export function useServerThemeSync(): void {
+  const { data } = useQuery(settingsQueryOptions());
+  const serverTheme = data?.theme;
+  useEffect(() => {
+    if (serverTheme && serverTheme !== getStoredPreference()) {
+      setPreference(serverTheme);
+    }
+  }, [serverTheme]);
 }

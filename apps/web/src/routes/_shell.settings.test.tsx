@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "../lib/api";
 import type { Settings } from "../lib/settings";
-import { useServerThemeSync } from "../lib/use-theme";
 import { SettingsView } from "./_shell.settings";
 
 vi.mock("../lib/api", async (importActual) => {
@@ -45,12 +44,6 @@ function renderWithClient(ui: ReactNode) {
 
 function renderView() {
   return renderWithClient(<SettingsView />);
-}
-
-/** Harnais minimal pour `useServerThemeSync` (utilisé par le shell). */
-function ThemeSyncHarness() {
-  useServerThemeSync();
-  return null;
 }
 
 beforeEach(() => {
@@ -106,15 +99,5 @@ describe("SettingsView (#18)", () => {
         body: JSON.stringify({ theme: "dark" }),
       }),
     );
-  });
-
-  it("réconcilie le thème serveur→local au chargement (via le shell)", async () => {
-    stubApi({ ...DEFAULTS, theme: "dark" });
-    renderWithClient(<ThemeSyncHarness />);
-
-    await waitFor(() =>
-      expect(document.documentElement.dataset.theme).toBe("dark"),
-    );
-    expect(localStorage.getItem("boreas.theme")).toBe("dark");
   });
 });

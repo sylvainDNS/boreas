@@ -29,9 +29,25 @@ export function clearSessionCookie(c: Context): void {
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
 }
 
-/** Vrai si la requête porte un cookie de session valide (signature + expiration). */
-export function hasValidSession(c: Context, secret: string): boolean {
-  const token = getCookie(c, SESSION_COOKIE);
+/**
+ * Validation pure d'un jeton de session — sans Hono, testable sans route HTTP.
+ * Délègue la signature et l'expiration à `verifySession` ; `now` (epoch s) est
+ * injectable pour des tests d'expiration déterministes.
+ */
+export function isValidSessionToken(
+  secret: string,
+  token: string | undefined,
+  now?: number,
+): boolean {
   if (!token) return false;
-  return verifySession(secret, token).ok;
+  return verifySession(secret, token, now).ok;
+}
+
+/**
+ * Adapter Hono : lit le cookie de session et délègue la validation à
+ * `isValidSessionToken`. Vrai si la requête porte un cookie valide
+ * (signature + expiration).
+ */
+export function hasValidSession(c: Context, secret: string): boolean {
+  return isValidSessionToken(secret, getCookie(c, SESSION_COOKIE));
 }

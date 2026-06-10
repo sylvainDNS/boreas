@@ -13,6 +13,12 @@ export const R2_DELETE_CHUNK = 1000;
 
 /** Découpe un tableau en tranches de taille `size` (la dernière peut être partielle). */
 export function chunk<T>(items: T[], size: number): T[][] {
+  // Garde-fou : un `size ≤ 0` ferait boucler `i += size` à l'infini. Inatteignable
+  // avec les tailles dérivées actuelles, mais cette fonction est désormais une API
+  // partagée — on échoue franchement plutôt que de figer le Worker.
+  if (size < 1) {
+    throw new RangeError(`chunk: size doit être ≥ 1 (reçu ${size})`);
+  }
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
     out.push(items.slice(i, i + size));

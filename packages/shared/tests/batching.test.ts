@@ -25,6 +25,11 @@ describe("chunk", () => {
   it("renvoie une unique tranche quand size ≥ length", () => {
     expect(chunk([1, 2, 3], 10)).toEqual([[1, 2, 3]]);
   });
+
+  it("lève si size ≤ 0 (sinon boucle infinie)", () => {
+    expect(() => chunk([1, 2], 0)).toThrow(RangeError);
+    expect(() => chunk([1, 2], -1)).toThrow(RangeError);
+  });
 });
 
 describe("insertChunkSize", () => {

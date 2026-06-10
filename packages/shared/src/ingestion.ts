@@ -120,9 +120,8 @@ export async function enqueueFeedIds(
   queue: Queue<IngestionMessage>,
   feedIds: string[],
 ): Promise<void> {
-  for (let i = 0; i < feedIds.length; i += QUEUE_BATCH_MAX) {
-    const chunk = feedIds.slice(i, i + QUEUE_BATCH_MAX);
-    await queue.sendBatch(chunk.map((feedId) => ({ body: { feedId } })));
+  for (const batch of chunk(feedIds, QUEUE_BATCH_MAX)) {
+    await queue.sendBatch(batch.map((feedId) => ({ body: { feedId } })));
   }
 }
 
@@ -537,8 +536,7 @@ async function upsertNewArticles(
   };
 
   const rows: Awaited<ReturnType<typeof buildRow>>[] = [];
-  for (let i = 0; i < fresh.length; i += EXTRACT_CONCURRENCY) {
-    const batch = fresh.slice(i, i + EXTRACT_CONCURRENCY);
+  for (const batch of chunk(fresh, EXTRACT_CONCURRENCY)) {
     rows.push(...(await Promise.all(batch.map(buildRow))));
   }
 

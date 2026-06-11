@@ -15,6 +15,28 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("alert");
   });
 
+  it("ne plante pas sur les commentaires HTML et les retire", () => {
+    // Régression : un commentaire HTML faisait planter DOMPurify 3.4.8 sur le
+    // DOM linkedom (Comment.remove() → this[END][NEXT] undefined), ce qui vidait
+    // le contenu des articles dont le flux en contient (ex. This Week In React).
+    const out = sanitizeHtml("<p>avant</p><!-- pub --><p>après</p>", {
+      signImageSrc,
+    });
+    expect(out).toContain("avant");
+    expect(out).toContain("après");
+    expect(out).not.toContain("<!--");
+  });
+
+  it("ne plante pas sur un commentaire HTML non fermé", () => {
+    // Repli HTML brut d'un flux mal formé : sans `-->`, le commentaire court
+    // jusqu'à l'EOF — on le retire en entier comme le ferait le parseur.
+    const out = sanitizeHtml("<p>avant</p><!-- commentaire sans fin", {
+      signImageSrc,
+    });
+    expect(out).toContain("avant");
+    expect(out).not.toContain("<!--");
+  });
+
   it("retire les gestionnaires d'événements inline", () => {
     const out = sanitizeHtml(
       `<img src="https://src.example/x.jpg" onerror="steal()" /><p onclick="boom()">hey</p>`,

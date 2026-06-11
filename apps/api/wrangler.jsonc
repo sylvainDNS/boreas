@@ -3,6 +3,19 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Workers Logs (observabilité) : `enabled` est l'interrupteur maître — il doit
+  // être à true pour que quoi que ce soit soit collecté (le bloc proposé par le
+  // Dashboard mettait `enabled: false` en racine, ce qui n'aurait rien loggué).
+  // `head_sampling_rate: 1` = on garde 100 % des invocations. Les traces (beta)
+  // restent désactivées.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
   // Variables non secrètes. HMAC_SECRET est posé séparément (secret Worker,
   // partagé avec boreas-cron). En local, .dev.vars surcharge ces valeurs
   // (ENVIRONMENT=development → e-mail mocké, APP_BASE_URL=localhost).

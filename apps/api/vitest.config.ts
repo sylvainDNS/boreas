@@ -23,6 +23,10 @@ export default defineConfig({
           compatibilityFlags: ["nodejs_compat"],
           d1Databases: ["DB"],
           r2Buckets: ["BUCKET"],
+          // Producteur de la Queue d'ingestion : les messages partent dans le vide
+          // (pas de consommateur en test), ce qui suffit aux routes qui enqueue le
+          // backfill (import OPML, (ré)abonnement).
+          queueProducers: ["INGESTION_QUEUE"],
           bindings: {
             TEST_MIGRATIONS: migrations,
             HMAC_SECRET: "test-secret",

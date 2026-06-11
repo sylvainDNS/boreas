@@ -3,6 +3,7 @@ import {
   buildConditionalHeaders,
   computeNextCheckAt,
   fetchFeed,
+  toFeedErrorCode,
 } from "../src/ingestion";
 
 describe("buildConditionalHeaders", () => {
@@ -73,6 +74,35 @@ describe("computeNextCheckAt", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.5);
     const result = computeNextCheckAt(30, 0, new Date("2026-06-05T12:00:00Z"));
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+});
+
+describe("toFeedErrorCode", () => {
+  it("ramène un timeout (AbortError) au code `timeout`", () => {
+    expect(toFeedErrorCode(new DOMException("aborted", "AbortError"))).toBe(
+      "timeout",
+    );
+  });
+
+  it("conserve les codes déjà normalisés par fetchFeed", () => {
+    expect(toFeedErrorCode(new Error("too_large"))).toBe("too_large");
+    expect(toFeedErrorCode(new Error("too_many_redirects"))).toBe(
+      "too_many_redirects",
+    );
+    expect(toFeedErrorCode(new Error("bad_redirect"))).toBe("bad_redirect");
+  });
+
+  it("ramène une défaillance réseau opaque à `fetch_failed`", () => {
+    // Message brut, variable et instance-spécifique remonté par le runtime.
+    expect(
+      toFeedErrorCode(new Error("internal error; reference = 8cuffvc3k42o")),
+    ).toBe("fetch_failed");
+  });
+
+  it("ramène une valeur non-Error à `fetch_failed`", () => {
+    expect(toFeedErrorCode("boom")).toBe("fetch_failed");
+    expect(toFeedErrorCode(null)).toBe("fetch_failed");
+    expect(toFeedErrorCode(undefined)).toBe("fetch_failed");
   });
 });
 

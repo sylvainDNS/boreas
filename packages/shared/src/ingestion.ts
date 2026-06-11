@@ -214,6 +214,35 @@ async function readBodyWithinLimit(
   return bytes;
 }
 
+/** Codes d'erreur de fetch déjà normalisés, levés tels quels par `fetchFeed`. */
+const KNOWN_FETCH_ERROR_CODES = new Set([
+  "bad_redirect",
+  "too_many_redirects",
+  "too_large",
+]);
+
+/**
+ * Normalise une exception du fetch d'un Feed en code d'erreur stable (#11),
+ * destiné à `last_error` : un `AbortError` (timeout) devient `timeout`, les
+ * erreurs déjà codées par `fetchFeed` (`too_large`…) sont conservées, et toute
+ * autre défaillance réseau — dont les messages opaques et variables type
+ * « internal error; reference = … » remontés par le runtime — est ramenée à
+ * `fetch_failed` plutôt que stockée brute. Les statuts HTTP non-2xx, eux, sont
+ * codés en amont (`http_<status>`), hors de ce chemin d'exception. Exporté pour
+ * test. (Un `DOMException` n'étant pas partout `instanceof Error`, on lit `name`
+ * et `message` par accès direct.)
+ */
+export function toFeedErrorCode(err: unknown): string {
+  if (typeof err === "object" && err !== null) {
+    const { name, message } = err as { name?: unknown; message?: unknown };
+    if (name === "AbortError") return "timeout";
+    if (typeof message === "string" && KNOWN_FETCH_ERROR_CODES.has(message)) {
+      return message;
+    }
+  }
+  return "fetch_failed";
+}
+
 /**
  * Construit les en-têtes de requête, en ajoutant les en-têtes de *conditional
  * GET* seulement s'ils sont connus (ETag → If-None-Match, Last-Modified →
@@ -313,7 +342,7 @@ export async function ingestFeed(
     }
   } catch (err) {
     status = "error";
-    error = err instanceof Error ? err.message : "fetch_failed";
+    error = toFeedErrorCode(err);
     console.error("[ingestion] échec du fetch du flux", feedId, err);
   }
 

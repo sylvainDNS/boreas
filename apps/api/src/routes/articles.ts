@@ -19,6 +19,7 @@ import {
   isNull,
   lt,
   or,
+  sql,
 } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -36,9 +37,11 @@ export const articlesRoutes = new Hono<{ Bindings: Env }>();
  * Liste paginée des articles, du plus récent au plus ancien.
  *
  * `filter=unread` (défaut) ne sert que les non-lus ; `filter=all` sert lus +
- * non-lus (#8, US 20). Pagination **keyset** sur `(fetched_at desc, id desc)` :
- * le curseur encode le dernier `(fetched_at, id)` servi, évitant les
- * sauts/doublons d'une pagination par offset quand de nouveaux articles arrivent.
+ * non-lus (#8, US 20). Tri par **date de publication** décroissante, avec
+ * fallback sur `fetched_at` quand le flux ne fournit pas de date (ADR 0015).
+ * Pagination **keyset** sur `(COALESCE(published_at, fetched_at) desc, id desc)` :
+ * le curseur encode la dernière clé de tri servie, évitant les sauts/doublons
+ * d'une pagination par offset quand de nouveaux articles arrivent.
  */
 articlesRoutes.get("/", async (c) => {
   const filterResult = articleFilterSchema.safeParse(
@@ -49,14 +52,15 @@ articlesRoutes.get("/", async (c) => {
   }
   const filter = filterResult.data;
 
+  // Clé de tri : date de publication, ou date d'ingestion à défaut. `fetched_at`
+  // étant NOT NULL, l'expression est toujours non-null (ADR 0015).
+  const sortKey = sql<string>`coalesce(${articles.published_at}, ${articles.fetched_at})`;
+
   const cursor = decodeCursor(c.req.query("cursor"));
   const keyset = cursor
     ? or(
-        lt(articles.fetched_at, cursor.fetchedAt),
-        and(
-          eq(articles.fetched_at, cursor.fetchedAt),
-          lt(articles.id, cursor.id),
-        ),
+        lt(sortKey, cursor.sortKey),
+        and(eq(sortKey, cursor.sortKey), lt(articles.id, cursor.id)),
       )
     : undefined;
   // `filter=unread` ne sert que les non-lus ; `filter=saved` ne sert que les
@@ -101,16 +105,19 @@ articlesRoutes.get("/", async (c) => {
     .from(articles)
     .innerJoin(feeds, eq(articles.feed_id, feeds.id))
     .where(and(scope, feedScope, folderScope, keyset, activeFeedScope))
-    .orderBy(desc(articles.fetched_at), desc(articles.id))
+    .orderBy(desc(sortKey), desc(articles.id))
     .limit(PAGE_SIZE + 1);
 
   // La (PAGE_SIZE+1)ᵉ ligne signale qu'il reste une page : on la retire et on
-  // calcule le curseur sur la dernière ligne effectivement servie.
+  // calcule le curseur sur la dernière ligne effectivement servie. La clé de
+  // tri du curseur doit reproduire le `coalesce` SQL : `publishedAt ?? fetchedAt`.
   const hasMore = rows.length > PAGE_SIZE;
   const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
   const last = page.at(-1);
   const nextCursor =
-    hasMore && last ? encodeCursor(last.fetchedAt, last.id) : null;
+    hasMore && last
+      ? encodeCursor(last.publishedAt ?? last.fetchedAt, last.id)
+      : null;
 
   return c.json({
     articles: page.map((row) => ({
@@ -121,6 +128,7 @@ articlesRoutes.get("/", async (c) => {
       summary: row.summary,
       link: row.link,
       publishedAt: row.publishedAt,
+      fetchedAt: row.fetchedAt,
       read: row.read,
       saved: row.saved,
     })),
@@ -308,12 +316,13 @@ articlesRoutes.get("/:id", async (c) => {
 });
 
 interface Cursor {
-  fetchedAt: string;
+  /** Clé de tri du dernier article servi : `coalesce(published_at, fetched_at)`. */
+  sortKey: string;
   id: string;
 }
 
-function encodeCursor(fetchedAt: string, id: string): string {
-  return toBase64Url(`${fetchedAt}|${id}`);
+function encodeCursor(sortKey: string, id: string): string {
+  return toBase64Url(`${sortKey}|${id}`);
 }
 
 function decodeCursor(raw: string | undefined): Cursor | null {
@@ -322,7 +331,7 @@ function decodeCursor(raw: string | undefined): Cursor | null {
     const decoded = fromBase64Url(raw);
     const sep = decoded.indexOf("|");
     if (sep === -1) return null;
-    return { fetchedAt: decoded.slice(0, sep), id: decoded.slice(sep + 1) };
+    return { sortKey: decoded.slice(0, sep), id: decoded.slice(sep + 1) };
   } catch {
     return null;
   }

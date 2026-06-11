@@ -3,6 +3,18 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Workers Logs (observabilité). `enabled` racine = interrupteur maître (doit
+  // être true pour collecter). Particulièrement utile ici : ce worker est le
+  // consommateur de la Queue d'ingestion, donc les échecs de fetch/parsing de
+  // flux y remontent. `head_sampling_rate: 1` = 100 % des invocations.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
   "triggers": {
     "crons": ["*/5 * * * *"]
   },

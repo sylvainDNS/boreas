@@ -157,6 +157,16 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
     purifier = createSanitizer();
   }
 
+  // Les commentaires HTML font planter linkedom 0.18.12 quand DOMPurify 3.4.8
+  // les force-remove (Comment.remove() accède à `this[END][NEXT]` = undefined).
+  // On les retire en amont : DOMPurify les supprimerait de toute façon, donc
+  // c'est sans effet sur la sortie — mais ça évite le crash qui, propagé jusqu'à
+  // `extractAndStore`, vidait le contenu des articles concernés (#6/#7).
+  // Le `(?:-->|$)` couvre aussi un commentaire non fermé (flux mal formé, repli
+  // HTML brut de `extractArticle`) : sans fin, le parseur l'étend jusqu'à l'EOF,
+  // on fait pareil — sinon le nœud commentaire subsiste et le crash revient.
+  const input = html.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+
   purifier.removeAllHooks();
   purifier.addHook("afterSanitizeAttributes", (node) => {
     const el = node as unknown as ElementLike;
@@ -182,7 +192,7 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
     }
   });
 
-  const clean = purifier.sanitize(html, {
+  const clean = purifier.sanitize(input, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
     // Conserve le contenu textuel des balises retirées (ex. <span> non listé).

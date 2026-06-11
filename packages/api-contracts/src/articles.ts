@@ -29,6 +29,8 @@ export const articleListItemSchema = z.object({
   summary: z.string().nullable(),
   link: z.string().nullable(),
   publishedAt: z.string().nullable(),
+  /** Date d'ingestion (NOT NULL) : fallback d'affichage quand publishedAt est null (ADR 0015). */
+  fetchedAt: z.string(),
   read: z.boolean(),
   saved: z.boolean(),
 });

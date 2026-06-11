@@ -23,6 +23,10 @@ async function seedArticle(opts: {
   contentKey?: string | null;
   read?: boolean;
   saved?: boolean;
+  /** Date de publication ISO, ou null (flux sans date). Défaut : null. */
+  publishedAt?: string | null;
+  /** Date d'ingestion ISO. Défaut : `2026-06-05T12:00:00Z`. */
+  fetchedAt?: string;
 }): Promise<void> {
   const feedId = opts.feedId ?? "feed-1";
   const feedTitle = feedId === "feed-1" ? "Mon flux" : `Flux ${feedId}`;
@@ -32,7 +36,7 @@ async function seedArticle(opts: {
     .bind(feedId, `https://src.example/${feedId}.xml`, feedTitle)
     .run();
   await env.DB.prepare(
-    "INSERT INTO articles (id, feed_id, article_key, title, link, content_key, read, saved, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO articles (id, feed_id, article_key, title, link, content_key, read, saved, published_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   )
     .bind(
       opts.id,
@@ -43,7 +47,8 @@ async function seedArticle(opts: {
       opts.contentKey ?? null,
       opts.read ? 1 : 0,
       opts.saved ? 1 : 0,
-      "2026-06-05T12:00:00Z",
+      opts.publishedAt ?? null,
+      opts.fetchedAt ?? "2026-06-05T12:00:00Z",
     )
     .run();
 }
@@ -161,6 +166,104 @@ describe("GET /api/articles — filtre lus/non-lus (#8)", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "unsupported_filter" });
+  });
+});
+
+describe("GET /api/articles — tri par date de publication (ADR 0015)", () => {
+  it("trie par published_at décroissant, indépendamment de l'ordre d'ingestion", async () => {
+    // Même fetched_at (lot de backfill) : seul published_at doit départager,
+    // pas l'UUID. Ordre d'insertion volontairement mélangé.
+    await seedArticle({
+      id: "art-old",
+      publishedAt: "2026-01-01T00:00:00Z",
+      fetchedAt: "2026-06-05T12:00:00Z",
+    });
+    await seedArticle({
+      id: "art-new",
+      publishedAt: "2026-06-04T00:00:00Z",
+      fetchedAt: "2026-06-05T12:00:00Z",
+    });
+    await seedArticle({
+      id: "art-mid",
+      publishedAt: "2026-03-01T00:00:00Z",
+      fetchedAt: "2026-06-05T12:00:00Z",
+    });
+
+    const body = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=all`, authed())
+    ).json()) as { articles: { id: string }[] };
+    expect(body.articles.map((a) => a.id)).toEqual([
+      "art-new",
+      "art-mid",
+      "art-old",
+    ]);
+  });
+
+  it("fallback sur fetched_at quand published_at est null, et expose fetchedAt", async () => {
+    // art-nodate n'a pas de date de publication : il doit se trier via son
+    // fetched_at (plus récent que la publication de art-dated) → en tête.
+    await seedArticle({
+      id: "art-dated",
+      publishedAt: "2026-02-01T00:00:00Z",
+      fetchedAt: "2026-06-01T00:00:00Z",
+    });
+    await seedArticle({
+      id: "art-nodate",
+      publishedAt: null,
+      fetchedAt: "2026-06-09T00:00:00Z",
+    });
+
+    const body = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=all`, authed())
+    ).json()) as {
+      articles: { id: string; publishedAt: string | null; fetchedAt: string }[];
+    };
+    expect(body.articles.map((a) => a.id)).toEqual(["art-nodate", "art-dated"]);
+    const nodate = body.articles.find((a) => a.id === "art-nodate");
+    expect(nodate?.publishedAt).toBeNull();
+    expect(nodate?.fetchedAt).toBe("2026-06-09T00:00:00Z");
+  });
+
+  it("pagine en keyset sans trou ni doublon, y compris published_at > fetched_at", async () => {
+    // 35 articles (> PAGE_SIZE=30) aux dates de publication décroissantes et
+    // distinctes ; certains publiés après leur fetch (date future relative au
+    // fetch) pour stresser la clé de tri coalesce.
+    const ids: string[] = [];
+    for (let i = 0; i < 35; i++) {
+      const id = `art-${String(i).padStart(2, "0")}`;
+      ids.push(id);
+      const day = String(28 - (i % 28)).padStart(2, "0");
+      await seedArticle({
+        id,
+        publishedAt: `2026-05-${day}T${String(i).padStart(2, "0")}:00:00Z`,
+        fetchedAt: "2026-04-01T00:00:00Z", // antérieur aux publications
+      });
+    }
+
+    const page1 = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=all`, authed())
+    ).json()) as { articles: { id: string }[]; nextCursor: string | null };
+    expect(page1.articles).toHaveLength(30);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = (await (
+      await SELF.fetch(
+        `${ORIGIN}/api/articles?filter=all&cursor=${encodeURIComponent(
+          page1.nextCursor as string,
+        )}`,
+        authed(),
+      )
+    ).json()) as { articles: { id: string }[]; nextCursor: string | null };
+    expect(page2.articles).toHaveLength(5);
+    expect(page2.nextCursor).toBeNull();
+
+    const seen = [
+      ...page1.articles.map((a) => a.id),
+      ...page2.articles.map((a) => a.id),
+    ];
+    // Aucun doublon, tous les articles couverts exactement une fois.
+    expect(new Set(seen).size).toBe(35);
+    expect([...seen].sort()).toEqual([...ids].sort());
   });
 });
 

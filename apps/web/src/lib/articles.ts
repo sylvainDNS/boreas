@@ -43,7 +43,9 @@ export function toArticle(dto: ArticleListItem): Article {
     feedName: dto.feedName,
     title: dto.title ?? "(sans titre)",
     excerpt: dto.summary ?? "",
-    time: formatRelativeTime(dto.publishedAt),
+    // Date d'affichage = publication, ou ingestion à défaut (ADR 0015) :
+    // cohérent avec la clé de tri SQL `coalesce(published_at, fetched_at)`.
+    time: formatRelativeTime(dto.publishedAt ?? dto.fetchedAt),
     link: dto.link,
     unread: !dto.read,
     saved: dto.saved,

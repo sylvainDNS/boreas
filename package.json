@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "pnpm -r --parallel --if-present run dev",
     "dev:api": "wrangler dev --config apps/api/wrangler.jsonc --persist-to .wrangler/state",
-    "dev:cron": "wrangler dev --config apps/cron/wrangler.jsonc --persist-to .wrangler/state",
+    "dev:cron": "wrangler dev --config apps/cron/wrangler.jsonc --persist-to .wrangler/state --test-scheduled",
     "dev:web": "pnpm --filter @boreas/web dev",
     "format": "biome format --write .",
     "lint": "biome lint .",

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Feed } from "../../lib/feeds";
 import type { Folder } from "../../lib/folders";
-import { groupFeedsByFolder } from "./sidebar-model";
+import {
+  groupFeedsByFolder,
+  resolveDropTarget,
+  UNFILED_DROPPABLE_ID,
+} from "./sidebar-model";
 
 /** Fabrique un Feed minimal (champs non pertinents au regroupement figés). */
 function makeFeed(id: string, folderId: string | null): Feed {
@@ -62,5 +66,15 @@ describe("groupFeedsByFolder", () => {
 
     expect(feedsByFolder.get("a")?.map((f) => f.id)).toEqual(["z", "a"]);
     expect(unfiledFeeds.map((f) => f.id)).toEqual(["u1", "u2"]);
+  });
+});
+
+describe("resolveDropTarget", () => {
+  it("traduit la sentinelle « sans dossier » en null (désassignation)", () => {
+    expect(resolveDropTarget(UNFILED_DROPPABLE_ID)).toBeNull();
+  });
+
+  it("renvoie tel quel un id de Folder réel", () => {
+    expect(resolveDropTarget("tech")).toBe("tech");
   });
 });

@@ -1,9 +1,17 @@
+import { useDraggable } from "@dnd-kit/react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { type Feed, feedLabel } from "../../lib/feeds";
 import type { Folder } from "../../lib/folders";
 import { MenuLabel, menuItemClass, RowMenu } from "../RowMenu";
 import { CountBadge, ErrorBadge } from "../ui/Badge";
-import { itemActive, itemBase, type SidebarDialog } from "./sidebar-model";
+import {
+  FEED_DRAG_TYPE,
+  type FeedDragData,
+  itemActive,
+  itemBase,
+  type SidebarDialog,
+} from "./sidebar-model";
 
 /**
  * Ligne d'un Feed dans la Sidebar (#48). État actif dérivé de la route
@@ -30,9 +38,31 @@ export function FeedRow({
   const isActive = Boolean(
     matchRoute({ to: "/feeds/$feedId", params: { feedId: feed.id } }),
   );
+  const label = feedLabel(feed);
+
+  // Draggable vers les dossiers / la zone « sans dossier ». Le seuil
+  // d'activation du PointerSensor (cf. Sidebar) distingue le clic (navigation via
+  // le Link) du drag ; `data` porte le folderId courant + le libellé du fantôme.
+  // Identité mémoïsée sur des primitives : dnd-kit compare `data` par `Object.is`
+  // et réassigne le signal du draggable à chaque changement — sans ça, chaque
+  // render (poll 30s, changement de route) le réécrirait inutilement.
+  const dragData = useMemo<FeedDragData>(
+    () => ({ folderId: feed.folderId, label }),
+    [feed.folderId, label],
+  );
+  const { ref, isDragSource } = useDraggable<FeedDragData>({
+    id: feed.id,
+    type: FEED_DRAG_TYPE,
+    data: dragData,
+  });
 
   return (
-    <div className={`group ${itemBase} ${isActive ? itemActive : ""}`}>
+    <div
+      ref={ref}
+      className={`group ${itemBase} ${isActive ? itemActive : ""} ${
+        isDragSource ? "opacity-50" : ""
+      }`}
+    >
       <Link
         to="/feeds/$feedId"
         params={{ feedId: feed.id }}
@@ -40,12 +70,12 @@ export function FeedRow({
         className="flex min-w-0 flex-1 items-center gap-2"
       >
         <span className="size-1.5 shrink-0 rounded-full bg-muted/40" />
-        <span className="truncate">{feedLabel(feed)}</span>
+        <span className="truncate">{label}</span>
       </Link>
       {feed.status === "error" && <ErrorBadge detail={feed.lastError} />}
       <CountBadge count={unread} />
       <RowMenu
-        label={`Actions pour ${feedLabel(feed)}`}
+        label={`Actions pour ${label}`}
         triggerClassName="opacity-60 transition-opacity group-hover:opacity-100"
       >
         {(close) => (

@@ -111,9 +111,15 @@ export interface UpdateFeedInput {
 
 /**
  * Mutation de renommage et/ou déplacement d'un Feed (`PATCH /api/feeds/:id`, US
- * 12 / #13). Invalide la liste des feeds (regroupement sidebar + libellé) ainsi
- * que les listes et compteurs d'articles : un déplacement change l'appartenance
- * aux vues Folder, un renommage le `feedName` affiché sur chaque carte.
+ * 12 / #13). **Optimiste sur le déplacement** : `onMutate` réécrit
+ * immédiatement le `folderId` dans le cache `FEEDS_LIST_KEY` pour que le drag-n-
+ * drop reclasse le Feed sans attendre l'aller-retour réseau ; `onError` restaure
+ * **uniquement le folderId du feed concerné** (et non un instantané de toute la
+ * liste), afin qu'un rollback n'écrase pas un déplacement concurrent encore en
+ * vol. `onSettled` réconcilie via `invalidateAfterFeedLifecycle` : indispensable
+ * pour les **compteurs par dossier** (`ARTICLES_COUNTS_KEY`), non réécrits à la
+ * main. Le renommage emprunte le même chemin (le `folderId` absent du patch
+ * laisse le cache intact).
  */
 export function updateFeedMutationOptions(queryClient: QueryClient) {
   return {
@@ -122,7 +128,43 @@ export function updateFeedMutationOptions(queryClient: QueryClient) {
         method: "PATCH",
         body: JSON.stringify(patch),
       }),
-    onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
+    onMutate: async ({
+      id,
+      folderId,
+    }: UpdateFeedInput): Promise<{
+      rollback?: { id: string; folderId: string | null };
+    }> => {
+      // Seul le déplacement est optimiste : un patch sans `folderId` (renommage
+      // pur) ne touche pas au regroupement, on laisse `onSettled` réconcilier.
+      if (folderId === undefined) return {};
+      await queryClient.cancelQueries({ queryKey: FEEDS_LIST_KEY });
+      const previous = queryClient
+        .getQueryData<Feed[]>(FEEDS_LIST_KEY)
+        ?.find((feed) => feed.id === id);
+      if (!previous) return {};
+      queryClient.setQueryData<Feed[]>(FEEDS_LIST_KEY, (feeds) =>
+        feeds?.map((feed) => (feed.id === id ? { ...feed, folderId } : feed)),
+      );
+      return { rollback: { id, folderId: previous.folderId } };
+    },
+    onError: (
+      _error: unknown,
+      _vars: UpdateFeedInput,
+      context:
+        | { rollback?: { id: string; folderId: string | null } }
+        | undefined,
+    ) => {
+      const rollback = context?.rollback;
+      if (!rollback) return;
+      queryClient.setQueryData<Feed[]>(FEEDS_LIST_KEY, (feeds) =>
+        feeds?.map((feed) =>
+          feed.id === rollback.id
+            ? { ...feed, folderId: rollback.folderId }
+            : feed,
+        ),
+      );
+    },
+    onSettled: () => invalidateAfterFeedLifecycle(queryClient),
   };
 }
 

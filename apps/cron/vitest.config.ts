@@ -5,6 +5,8 @@ import {
 } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
 
+import { silenceSourcemapWarnings } from "../../vitest.logger";
+
 // Les tests tournent dans le runtime Workers (miniflare). On y injecte une D1
 // locale migrée depuis le package partagé et un bucket R2 local : la rétention
 // (#15) touche les deux stores, on la teste donc contre de vrais bindings.
@@ -15,6 +17,7 @@ const migrationsPath = path.join(
 
 export default defineConfig({
   plugins: [
+    silenceSourcemapWarnings(),
     cloudflareTest(async () => {
       const migrations = await readD1Migrations(migrationsPath);
       return {

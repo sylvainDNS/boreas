@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import type { ArticleSearch } from "../lib/article-search";
 import type { ArticleView } from "../lib/use-article-view";
 import { ArticleCard } from "./ArticleCard";
 import { EmptyState } from "./EmptyState";
@@ -38,16 +40,33 @@ export function ArticleListView({ view }: ArticleListViewProps) {
     isRefreshing = false,
   } = view;
 
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
-  // Cherche la sélection DANS la liste courante : si l'article sélectionné
-  // n'appartient pas à cette vue (navigation entre routes réutilisant ce
-  // composant, ex. feed → feed), `selected` devient undefined et le lecteur
-  // retombe sur son état vide — au lieu d'afficher un article hors-liste.
+  // L'Article ouvert vit dans l'URL (`?article=<id>`, ADR 0016) : le back système
+  // ramène à la liste et l'Article est deep-linkable. `strict: false` lit le
+  // search param quelle que soit la route liste qui monte ce composant.
+  // `useNavigate()` non lié à une route (ce composant est monté par 4 routes
+  // différentes) se type sur la racine, où le search est `never`. On le re-type
+  // sur notre search param ; chaque route le valide via `validateArticleSearch`.
+  const navigate = useNavigate() as (opts: {
+    search: (prev: ArticleSearch) => ArticleSearch;
+  }) => Promise<void>;
+  const { article: selectedId } = useSearch({ strict: false }) as ArticleSearch;
+  const openArticle = (id: string) => {
+    // Push (pas de replace) : chaque Article ouvert pousse une entrée d'historique.
+    void navigate({ search: (prev) => ({ ...prev, article: id }) });
+  };
+  const closeArticle = () => {
+    void navigate({ search: ({ article: _drop, ...rest }) => rest });
+  };
+  // Cherche la sélection DANS la liste courante : sert de fast-path pour un
+  // en-tête de lecteur instantané. Peut être `undefined` (deep-link/refresh sur
+  // un Article hors de la page chargée) → le lecteur retombe sur la query détail.
   const selected = articles.find((a) => a.id === selectedId);
   // Compteur exact fourni par l'API (#8) ; sinon retombe sur le décompte local
   // (vues encore sur données mock jusqu'à #13).
   const unread = unreadCount ?? articles.filter((a) => a.unread).length;
-  const hasSelection = Boolean(selected);
+  // Dérive du param d'URL (pas de `selected`) : le lecteur s'affiche même si
+  // l'item n'est pas dans la liste, le temps que la query détail réponde.
+  const hasSelection = Boolean(selectedId);
 
   // Sentinelle de scroll infini : observe un élément en bas de liste et déclenche
   // le chargement de la page suivante dès qu'il devient visible.
@@ -123,7 +142,7 @@ export function ArticleListView({ view }: ArticleListViewProps) {
                   key={article.id}
                   article={article}
                   selected={article.id === selectedId}
-                  onSelect={() => setSelectedId(article.id)}
+                  onSelect={() => openArticle(article.id)}
                   onToggleRead={
                     onToggleRead
                       ? (read) => onToggleRead(article.id, read)
@@ -154,20 +173,18 @@ export function ArticleListView({ view }: ArticleListViewProps) {
           hasSelection ? "flex" : "hidden lg:flex"
         }`}
       >
-        {/* Barre retour (mobile uniquement) */}
-        {selected && (
+        {/* Barre retour (mobile uniquement). Retire le param plutôt que
+            history.back() : un deep-link à froid n'a pas d'entrée précédente. */}
+        {selectedId && (
           <div className="flex h-14 shrink-0 items-center border-border border-b px-2 lg:hidden">
-            <IconButton
-              label="Retour à la liste"
-              onClick={() => setSelectedId(undefined)}
-            >
+            <IconButton label="Retour à la liste" onClick={closeArticle}>
               ←
             </IconButton>
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {selected ? (
-            <ReaderPane article={selected} />
+          {selectedId ? (
+            <ReaderPane articleId={selectedId} listItem={selected} />
           ) : (
             <EmptyState icon="📖" title="Aucun article sélectionné">
               Choisissez un article dans la liste pour le lire ici.

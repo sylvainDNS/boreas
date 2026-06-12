@@ -2,14 +2,15 @@ import type {
   ArticleCountsResponse,
   ArticleListResponse,
 } from "@boreas/api-contracts";
-import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import { renderHook, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArticleListView } from "../components/ArticleListView";
 import type { ApiHandlerContext } from "../test/api-mock";
 import { stubApi } from "../test/api-mock";
-import { createAppWrapper } from "../test/render";
+import { createAppWrapper, renderWithApp } from "../test/render";
 import { apiFetch } from "./api";
+import { toArticle } from "./articles";
 import type { ArticleView } from "./use-article-view";
 import { useArticleView } from "./use-article-view";
 
@@ -305,23 +306,106 @@ describe("useArticleView", () => {
   });
 });
 
+/** `ArticleView` minimal surchargeable (la liste attend le modèle de vue). */
+function baseView(articles: ArticleView["articles"] = []): ArticleView {
+  return {
+    title: "Tous les non-lus",
+    emptyLabel: "Tout est lu 🎉",
+    articles,
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    onEndReached: () => {},
+    onToggleSaved: () => {},
+  };
+}
+
 describe("<ArticleListView view />", () => {
-  it("smoke : rend titre et état vide depuis le view fourni", () => {
-    const view: ArticleView = {
-      title: "Tous les non-lus",
-      emptyLabel: "Tout est lu 🎉",
-      articles: [],
-      isLoading: false,
-      isError: false,
-      hasNextPage: false,
-      isFetchingNextPage: false,
-      onEndReached: () => {},
-      onToggleSaved: () => {},
-    };
-    render(<ArticleListView view={view} />);
+  it("smoke : rend titre et état vide depuis le view fourni", async () => {
+    renderWithApp(<ArticleListView view={baseView()} />);
     expect(
-      screen.getByRole("heading", { name: "Tous les non-lus" }),
+      await screen.findByRole("heading", { name: "Tous les non-lus" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Tout est lu 🎉")).toBeInTheDocument();
+  });
+
+  it("ouvrir un Article pousse `?article` dans l'URL (back système → liste)", async () => {
+    stubApi(mockedFetch, {
+      "GET /articles/:id": ({ params }: ApiHandlerContext) => ({
+        id: params.id as string,
+        feedName: "Flux 1",
+        title: "Titre a1",
+        link: null,
+        publishedAt: null,
+        content: "<p>corps</p>",
+        saved: false,
+        unread: true,
+      }),
+    });
+    const view = baseView([toArticle(item("a1"))]);
+    const { user, router } = renderWithApp(<ArticleListView view={view} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Lire : Titre a1" }),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ article: "a1" }),
+    );
+  });
+
+  it("deep-link : Article hors de la liste chargée → lecteur via la query détail", async () => {
+    stubApi(mockedFetch, {
+      "GET /articles/:id": ({ params }: ApiHandlerContext) => ({
+        id: params.id as string,
+        feedName: "Flux distant",
+        title: "Article distant",
+        link: null,
+        publishedAt: "2026-01-01T00:00:00.000Z",
+        content: "<p>contenu plein</p>",
+        saved: false,
+        unread: false,
+      }),
+    });
+    // Liste vide : l'article ouvert n'y figure pas (refresh sur article paginé).
+    renderWithApp(<ArticleListView view={baseView()} />, {
+      initialPath: "/?article=x1",
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Article distant" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Flux distant")).toBeInTheDocument();
+  });
+
+  it("deep-link : sauvegarder met à jour l'étoile du lecteur (cache détail patché)", async () => {
+    stubApi(mockedFetch, {
+      "GET /articles/:id": ({ params }: ApiHandlerContext) => ({
+        id: params.id as string,
+        feedName: "Flux distant",
+        title: "Article distant",
+        link: null,
+        publishedAt: null,
+        content: "<p>contenu plein</p>",
+        saved: false,
+        unread: false,
+      }),
+      "PATCH /articles/:id": ({ params, body }: ApiHandlerContext) => ({
+        id: params.id as string,
+        ...(body as Record<string, unknown>),
+      }),
+    });
+    // Article hors liste : `saved` provient du cache détail, jamais d'un cache
+    // de liste — le flip doit donc patcher la query détail (régression #review).
+    const { user } = renderWithApp(<ArticleListView view={baseView()} />, {
+      initialPath: "/?article=x1",
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "☆ Sauvegarder" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "★ Sauvegardé" }),
+    ).toBeInTheDocument();
   });
 });

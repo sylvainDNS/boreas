@@ -199,6 +199,23 @@ export function setArticleSavedInListCaches(
 }
 
 /**
+ * Pose l'état Saved dans le cache de la **query détail** (`?article`/deep-link).
+ * Sans ça, l'étoile du lecteur d'un Article ouvert hors liste (où aucun cache de
+ * liste ne porte l'article) resterait figée sur sa valeur d'origine après bascule.
+ * No-op si le détail n'est pas en cache.
+ */
+function setArticleSavedInDetailCache(
+  queryClient: QueryClient,
+  id: string,
+  saved: boolean,
+): void {
+  queryClient.setQueryData<ArticleDetail>(
+    articleDetailQueryOptions(id).queryKey,
+    (prev) => (prev ? { ...prev, saved } : prev),
+  );
+}
+
+/**
  * Retire un Article du cache de la **vue Saved** uniquement (`filter=saved`).
  * Appelé quand on désauve : un article non-Saved n'a plus sa place dans cette
  * vue, alors qu'il reste visible (étoile vide) dans « Tous les non-lus ».
@@ -229,22 +246,35 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
         body: JSON.stringify({ saved }),
       }),
     onMutate: async ({ id, saved }: { id: string; saved: boolean }) => {
+      const detailKey = articleDetailQueryOptions(id).queryKey;
       await queryClient.cancelQueries({ queryKey: ARTICLES_LIST_KEY });
+      await queryClient.cancelQueries({ queryKey: detailKey });
       const previous = queryClient.getQueriesData({
         queryKey: ARTICLES_LIST_KEY,
       });
+      const previousDetail = queryClient.getQueryData<ArticleDetail>(detailKey);
       setArticleSavedInListCaches(queryClient, id, saved);
+      setArticleSavedInDetailCache(queryClient, id, saved);
       if (!saved) removeArticleFromSavedCache(queryClient, id);
-      return { previous };
+      return { previous, previousDetail, detailKey };
     },
     onError: (
       _err: unknown,
       _vars: { id: string; saved: boolean },
-      context: { previous: [readonly unknown[], unknown][] } | undefined,
+      context:
+        | {
+            previous: [readonly unknown[], unknown][];
+            previousDetail: ArticleDetail | undefined;
+            detailKey: readonly unknown[];
+          }
+        | undefined,
     ) => {
-      // Le serveur n'a rien changé : on restaure les listes d'avant la bascule.
+      // Le serveur n'a rien changé : on restaure les listes et le détail d'avant.
       for (const [key, data] of context?.previous ?? []) {
         queryClient.setQueryData(key, data);
+      }
+      if (context) {
+        queryClient.setQueryData(context.detailKey, context.previousDetail);
       }
     },
     onSettled: () => {

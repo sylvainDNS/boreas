@@ -51,6 +51,11 @@ export const articleDetailResponseSchema = z.object({
   link: z.string().nullable(),
   publishedAt: z.string().nullable(),
   content: z.string().nullable(),
+  /** État Saved et non-lu : permet au lecteur de se rendre depuis le seul `id`
+   *  (deep-link/refresh sur un Article hors de la page de liste chargée).
+   *  `unread` reflète l'état AVANT le marquage Read induit par ce GET. */
+  saved: z.boolean(),
+  unread: z.boolean(),
 });
 export type ArticleDetailResponse = z.infer<typeof articleDetailResponseSchema>;
 

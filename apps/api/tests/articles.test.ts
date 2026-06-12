@@ -105,6 +105,23 @@ describe("GET /api/articles/:id — lecteur", () => {
     expect(row?.read).toBe(1);
   });
 
+  it("renvoie saved + unread (unread reflète l'état AVANT le marquage Read)", async () => {
+    await seedArticle({
+      id: "art-su",
+      contentKey: null,
+      read: false,
+      saved: true,
+    });
+
+    const res = await SELF.fetch(`${ORIGIN}/api/articles/art-su`, authed());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { saved: boolean; unread: boolean };
+    // `unread` = état pré-marquage : le client sait ainsi qu'il était non-lu
+    // (pour invalider les compteurs), bien que ce GET vienne de le passer Read.
+    expect(body).toMatchObject({ saved: true, unread: true });
+    expect(await readState("art-su")).toBe(1);
+  });
+
   it("renvoie content:null quand l'article n'a pas de contenu extrait", async () => {
     await seedArticle({ id: "art-2", contentKey: null });
 

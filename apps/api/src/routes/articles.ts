@@ -275,6 +275,7 @@ articlesRoutes.get("/:id", async (c) => {
       publishedAt: articles.published_at,
       contentKey: articles.content_key,
       read: articles.read,
+      saved: articles.saved,
       feedTitle: feeds.title,
       feedUrl: feeds.url,
     })
@@ -312,6 +313,10 @@ articlesRoutes.get("/:id", async (c) => {
     link: row.link,
     publishedAt: row.publishedAt,
     content,
+    saved: row.saved,
+    // `unread` AVANT le marquage Read ci-dessus : le client sait ainsi si
+    // l'Article « était non-lu » pour invalider les compteurs.
+    unread: !row.read,
   } satisfies ArticleDetailResponse);
 });
 

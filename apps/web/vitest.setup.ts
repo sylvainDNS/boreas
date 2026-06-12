@@ -17,6 +17,17 @@ class IntersectionObserverStub {
 globalThis.IntersectionObserver =
   IntersectionObserverStub as unknown as typeof IntersectionObserver;
 
+// jsdom ne fournit pas `ResizeObserver` ; `@dnd-kit/dom` l'instancie au
+// chargement du module (drag-n-drop des Feeds). Même stub no-op : les tests
+// montent les composants sans simuler de redimensionnement.
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+globalThis.ResizeObserver =
+  ResizeObserverStub as unknown as typeof ResizeObserver;
+
 // Démonte l'arbre rendu entre chaque test (isolation du DOM).
 afterEach(() => {
   cleanup();

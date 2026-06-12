@@ -13,6 +13,39 @@ export const itemBase =
 /** Classe additionnelle d'une ligne active (route courante). */
 export const itemActive = "bg-surface-2 font-medium text-accent";
 
+/**
+ * Type des draggables de la Sidebar (drag-n-drop des Feeds). Les droppables
+ * (dossiers + zone « sans dossier ») n'acceptent que ce type, ce qui isole le
+ * drag des Feeds de tout autre usage futur de dnd-kit.
+ */
+export const FEED_DRAG_TYPE = "feed";
+
+/**
+ * Données portées par un Feed draggable. `folderId` permet à `onDragEnd` de
+ * court-circuiter un drop sur le dossier courant (no-op) ; `label` alimente le
+ * fantôme du `DragOverlay` sans relecture du cache.
+ */
+export interface FeedDragData {
+  folderId: string | null;
+  label: string;
+}
+
+/**
+ * Identifiant du droppable « Flux (sans dossier) ». Sentinelle distincte
+ * d'un `folderId` réel : lâcher un Feed dessus le désassigne (`folderId = null`).
+ * `resolveDropTarget` la retraduit en `null`.
+ */
+export const UNFILED_DROPPABLE_ID = "sidebar:unfiled";
+
+/**
+ * Traduit l'identifiant d'un droppable de la Sidebar en `folderId` cible pour
+ * `move` : la sentinelle « sans dossier » → `null` (désassignation), tout autre
+ * id → l'id de Folder tel quel. Pur et testable, sans dépendance à dnd-kit.
+ */
+export function resolveDropTarget(droppableId: string): string | null {
+  return droppableId === UNFILED_DROPPABLE_ID ? null : droppableId;
+}
+
 /** Résultat du regroupement : feeds par dossier + feeds sans dossier. */
 export interface GroupedFeeds {
   /** Feeds rattachés à un Folder **connu**, indexés par `folderId`. */

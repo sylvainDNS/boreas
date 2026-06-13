@@ -39,5 +39,8 @@ coverage/
 # Vite cache
 .vite/
 
+# TanStack Router cache (généré au dev)
+.tanstack/
+
 # Plannotator goal packages (local planning artifacts)
 goals/

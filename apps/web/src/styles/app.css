@@ -67,13 +67,277 @@
   }
 }
 
-/* Typographie de lecture du contenu d'article (panneau lecteur).
-   Réutilisée par la tranche #7 (contenu extrait). */
+/* ----------------------------------------------- Contenu d'article (lecteur)
+   Style de lecture du HTML d'article rendu par `ArticleContent` (ADR 0017).
+   Distinction titres/sections + tous les tags ; blocs de code colorés (palette
+   GitHub via les variables --tok-* / --code-*, clé sur `data-theme`). */
 .reader-prose {
+  /* Dérive du token mono de Tailwind (--font-mono), avec repli si absent. */
+  --reader-mono: var(
+    --font-mono,
+    ui-monospace,
+    "SFMono-Regular",
+    Menlo,
+    Consolas,
+    "Liberation Mono",
+    monospace
+  );
+  /* Palette de tokens GitHub — thème clair (override sombre plus bas). */
+  --code-bg: #f6f8fa;
+  --code-fg: #1f2328;
+  --code-border: #d0d7de;
+  --tok-keyword: #cf222e;
+  --tok-string: #0a3069;
+  --tok-comment: #6e7781;
+  --tok-number: #0550ae;
+  --tok-function: #8250df;
+  --tok-builtin: #953800;
+  --tok-attr: #0550ae;
+  --tok-literal: #0550ae;
+  --tok-meta: #6e7781;
+  --tok-punc: #1f2328;
+
   font-family: var(--font-read);
-  line-height: 1.7;
-  font-size: 1.05rem;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+[data-theme="dark"] .reader-prose {
+  --code-bg: #161b22;
+  --code-fg: #e6edf3;
+  --code-border: #30363d;
+  --tok-keyword: #ff7b72;
+  --tok-string: #a5d6ff;
+  --tok-comment: #8b949e;
+  --tok-number: #79c0ff;
+  --tok-function: #d2a8ff;
+  --tok-builtin: #ffa657;
+  --tok-attr: #79c0ff;
+  --tok-literal: #79c0ff;
+  --tok-meta: #8b949e;
+  --tok-punc: #e6edf3;
+}
+
+/* Marges remises à zéro (specificity 0 via :where), espacement vertical au niveau racine. */
+.reader-prose
+:where(
+  p,
+  ul,
+  ol,
+  dl,
+  blockquote,
+  table,
+  figure,
+  pre,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  hr,
+  .code-card
+) {
+  margin: 0;
 }
 .reader-prose > * + * {
   margin-top: 1.1em;
+}
+
+/* Titres / sections */
+.reader-prose h1 {
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 1.6em;
+}
+.reader-prose h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 2.1em;
+  padding-left: 0.65rem;
+  border-left: 4px solid var(--color-accent);
+}
+.reader-prose h3 {
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted);
+  margin-top: 1.8em;
+}
+
+/* Listes */
+.reader-prose ul,
+.reader-prose ol {
+  padding-left: 1.4em;
+}
+.reader-prose li + li {
+  margin-top: 0.4em;
+}
+
+/* Liens */
+.reader-prose a {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid
+    color-mix(in oklch, var(--color-accent) 40%, transparent);
+}
+.reader-prose a:hover {
+  border-bottom-color: var(--color-accent);
+}
+
+/* Citations */
+.reader-prose blockquote {
+  background: var(--color-surface-2);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-card) var(--radius-card) 0;
+  padding: 0.9rem 1.15rem;
+  font-style: italic;
+}
+.reader-prose blockquote :where(p) {
+  margin: 0;
+}
+
+/* Tables */
+.reader-prose table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+.reader-prose th,
+.reader-prose td {
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.reader-prose th {
+  background: var(--color-surface-2);
+  font-weight: 650;
+}
+
+/* Images */
+.reader-prose img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border);
+}
+.reader-prose figcaption {
+  text-align: center;
+  font-size: 0.83rem;
+  color: var(--color-muted);
+  font-style: italic;
+  margin-top: 0.55rem;
+}
+
+/* Code inline (hors carte de code) */
+.reader-prose :not(pre) > code {
+  background: var(--color-surface-2);
+  padding: 0.1em 0.36em;
+  border-radius: 6px;
+  font-size: 0.88em;
+  font-family: var(--reader-mono);
+}
+
+/* Carte de code « fenêtre » (composant CodeBlock) */
+.reader-prose .code-card {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.reader-prose .code-card__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--code-border);
+  font-family: var(--reader-mono);
+  font-size: 0.72rem;
+}
+.reader-prose .code-card__dots {
+  letter-spacing: 0.18em;
+  color: var(--tok-comment);
+}
+.reader-prose .code-card__lang {
+  color: var(--tok-comment);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.reader-prose .code-card__copy {
+  margin-left: auto;
+  cursor: pointer;
+  border: 1px solid var(--code-border);
+  background: transparent;
+  color: var(--code-fg);
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.72rem;
+}
+.reader-prose .code-card__copy:hover {
+  background: color-mix(in srgb, var(--code-fg) 8%, transparent);
+}
+.reader-prose .code-card__copy:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.reader-prose .code-card pre {
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+  color: var(--code-fg);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+.reader-prose .code-card pre code {
+  font-family: var(--reader-mono);
+  background: none;
+}
+
+/* Coloration des tokens highlight.js → variables de palette */
+.reader-prose .hljs-comment,
+.reader-prose .hljs-quote {
+  color: var(--tok-comment);
+  font-style: italic;
+}
+.reader-prose .hljs-keyword,
+.reader-prose .hljs-selector-tag {
+  color: var(--tok-keyword);
+}
+.reader-prose .hljs-literal,
+.reader-prose .hljs-boolean {
+  color: var(--tok-literal);
+}
+.reader-prose .hljs-string,
+.reader-prose .hljs-regexp,
+.reader-prose .hljs-addition {
+  color: var(--tok-string);
+}
+.reader-prose .hljs-number,
+.reader-prose .hljs-bullet {
+  color: var(--tok-number);
+}
+.reader-prose .hljs-title,
+.reader-prose .hljs-title.class_,
+.reader-prose .hljs-title.function_,
+.reader-prose .hljs-section,
+.reader-prose .hljs-name {
+  color: var(--tok-function);
+}
+.reader-prose .hljs-built_in,
+.reader-prose .hljs-type {
+  color: var(--tok-builtin);
+}
+.reader-prose .hljs-attr,
+.reader-prose .hljs-attribute,
+.reader-prose .hljs-property {
+  color: var(--tok-attr);
+}
+.reader-prose .hljs-meta {
+  color: var(--tok-meta);
+}
+.reader-prose .hljs-punctuation {
+  color: var(--tok-punc);
 }

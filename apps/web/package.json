@@ -17,7 +17,11 @@
     "@tanstack/react-router": "^1.170.10",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "rehype-highlight": "^7.0.2",
+    "rehype-parse": "^9.0.1",
+    "rehype-react": "^8.0.0",
     "tailwindcss": "^4.3.0",
+    "unified": "^11.0.5",
     "zod": "4.4.3"
   },
   "devDependencies": {

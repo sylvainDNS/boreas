@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
   ARTICLES_COUNTS_KEY,
   type Article,
@@ -14,8 +14,13 @@ import {
   toggleArticleSavedMutationOptions,
 } from "../lib/articles";
 import { formatRelativeTime } from "../lib/time";
+import { ContentErrorBoundary } from "./ContentErrorBoundary";
 import { EmptyState } from "./EmptyState";
 import { buttonClasses } from "./ui/Button";
+
+// Pipeline rehype (unified + lowlight) chargé à la demande : le code de coloration
+// ne pèse sur le bundle qu'à l'ouverture d'un article (ADR 0017).
+const ArticleContent = lazy(() => import("./ArticleContent"));
 
 /**
  * Panneau lecteur, piloté par `articleId` (search param `?article`, ADR 0016).
@@ -74,12 +79,14 @@ export function ReaderPane({
   const link = detail.data?.link ?? listItem?.link ?? null;
 
   return (
-    <article className="mx-auto max-w-2xl px-6 py-8 sm:px-8 sm:py-10">
-      <div className="mb-2 font-medium text-accent text-sm">{feedName}</div>
-      <h1 className="mb-3 font-read font-semibold text-2xl leading-tight sm:text-3xl">
+    <article className="mx-auto max-w-[40rem] px-6 py-8 sm:px-8 sm:py-10">
+      <div className="mb-2 font-medium font-mono text-accent text-xs uppercase tracking-wider">
+        {feedName}
+      </div>
+      <h1 className="mb-3 font-read font-semibold text-3xl leading-tight tracking-tight">
         {title}
       </h1>
-      <div className="mb-8 flex flex-wrap items-center gap-3 border-border border-b pb-4 text-muted text-sm">
+      <div className="mb-8 flex flex-wrap items-center gap-3 border-border border-b pb-4 font-mono text-muted text-xs">
         <span>{time}</span>
         <span className="ml-auto flex gap-2">
           <button
@@ -135,11 +142,30 @@ function ReaderBody({
       </EmptyState>
     );
   }
+  // Le HTML est sûr par construction (sanitization serveur, ADR 0007) ; `ArticleContent`
+  // le rend en React + colore les blocs de code (ADR 0017). Suspense couvre le chargement
+  // lazy du pipeline rehype ; ContentErrorBoundary garantit l'affichage du contenu (repli
+  // non coloré) si ce pipeline échoue — l'ancien dangerouslySetInnerHTML ne pouvait jamais planter.
+  const content = detail.data.content;
   return (
-    <div
-      className="reader-prose"
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML sanitizé côté serveur avant stockage (ADR 0007)
-      dangerouslySetInnerHTML={{ __html: detail.data.content }}
-    />
+    <ContentErrorBoundary
+      fallback={
+        <div
+          className="reader-prose"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: HTML sanitizé serveur (ADR 0007) ; repli si le rendu rehype échoue
+          dangerouslySetInnerHTML={{ __html: content }}
+        />
+      }
+    >
+      <div className="reader-prose">
+        <Suspense
+          fallback={
+            <p className="py-8 text-center text-muted text-sm">Chargement…</p>
+          }
+        >
+          <ArticleContent html={content} />
+        </Suspense>
+      </div>
+    </ContentErrorBoundary>
   );
 }

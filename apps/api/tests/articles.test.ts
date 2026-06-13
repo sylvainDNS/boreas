@@ -89,12 +89,14 @@ describe("GET /api/articles/:id — lecteur", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       id: string;
+      feedId: string;
       feedName: string;
       title: string;
       link: string;
       content: string | null;
     };
     expect(body.id).toBe("art-1");
+    expect(body.feedId).toBe("feed-1");
     expect(body.feedName).toBe("Mon flux");
     expect(body.content).toBe("<p>Le vent du nord souffle.</p>");
 

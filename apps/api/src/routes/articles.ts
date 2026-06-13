@@ -270,6 +270,7 @@ articlesRoutes.get("/:id", async (c) => {
   const [row] = await db
     .select({
       id: articles.id,
+      feedId: articles.feed_id,
       title: articles.title,
       link: articles.link,
       publishedAt: articles.published_at,
@@ -308,6 +309,7 @@ articlesRoutes.get("/:id", async (c) => {
 
   return c.json({
     id: row.id,
+    feedId: row.feedId,
     feedName: row.feedTitle ?? row.feedUrl,
     title: row.title,
     link: row.link,

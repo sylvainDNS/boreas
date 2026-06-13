@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect } from "react";
 import {
   ARTICLES_COUNTS_KEY,
@@ -21,6 +22,10 @@ import { buttonClasses } from "./ui/Button";
 // Pipeline rehype (unified + lowlight) chargé à la demande : le code de coloration
 // ne pèse sur le bundle qu'à l'ouverture d'un article (ADR 0017).
 const ArticleContent = lazy(() => import("./ArticleContent"));
+
+/** Style du nom de Feed en en-tête, partagé par les rendus lien et texte. */
+const feedTagClass =
+  "mb-2 inline-block font-medium font-mono text-accent text-xs uppercase tracking-wider";
 
 /**
  * Panneau lecteur, piloté par `articleId` (search param `?article`, ADR 0016).
@@ -67,6 +72,9 @@ export function ReaderPane({
 
   // Métadonnées d'en-tête : item de liste prioritaire, détail en repli.
   const feedName = listItem?.feedName ?? detail.data?.feedName ?? "";
+  // Feed source : item de liste (clic) ou détail (deep-link/refresh). Pilote le
+  // lien du titre vers la liste du Feed ; absent tant que rien n'a répondu → texte.
+  const feedId = listItem?.feedId ?? detail.data?.feedId;
   const title = listItem?.title ?? detail.data?.title ?? "(sans titre)";
   const time =
     listItem?.time ??
@@ -80,9 +88,20 @@ export function ReaderPane({
 
   return (
     <article className="mx-auto max-w-[40rem] px-6 py-8 sm:px-8 sm:py-10">
-      <div className="mb-2 font-medium font-mono text-accent text-xs uppercase tracking-wider">
-        {feedName}
-      </div>
+      {/* Titre du Feed → liste de ses articles. `to`/`params` sans search : on
+          ne reporte pas `?article`, donc l'Article se ferme et la liste s'affiche
+          (même pattern que FeedRow de la Sidebar). Repli texte si feedId inconnu. */}
+      {feedId ? (
+        <Link
+          to="/feeds/$feedId"
+          params={{ feedId }}
+          className={`${feedTagClass} hover:underline`}
+        >
+          {feedName}
+        </Link>
+      ) : (
+        <div className={feedTagClass}>{feedName}</div>
+      )}
       <h1 className="mb-3 font-read font-semibold text-3xl leading-tight tracking-tight">
         {title}
       </h1>

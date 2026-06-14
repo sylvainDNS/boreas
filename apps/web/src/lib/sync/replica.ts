@@ -1,6 +1,6 @@
 import { openReplica, type ReplicaDb } from "./replica-store";
 import { runSync } from "./sync-engine";
-import { pullSyncDelta } from "./transport";
+import { pullSyncDelta, pushOutboxEntry } from "./transport";
 
 /**
  * Accès partagé au réplica IndexedDB (#72, ADR 0018) : une **unique** connexion
@@ -42,7 +42,7 @@ export function syncReplica(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = (async () => {
     const db = await getReplica();
-    await runSync(db, pullSyncDelta);
+    await runSync(db, pullSyncDelta, pushOutboxEntry);
   })().finally(() => {
     inFlight = null;
   });

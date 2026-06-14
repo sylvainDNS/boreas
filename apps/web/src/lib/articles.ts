@@ -4,9 +4,7 @@ import type {
   ArticleFilter,
   ArticleListItem,
   ArticleListResponse,
-  ArticlePatchResponse,
   MarkReadRequest,
-  MarkReadResponse,
   RefreshResponse,
 } from "@boreas/api-contracts";
 import {
@@ -15,7 +13,12 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { apiFetch } from "./api";
-import { getReplica } from "./sync/replica";
+import {
+  enqueueOutbox,
+  markReadInReplica,
+  setArticleFieldInReplica,
+} from "./sync/outbox-store";
+import { getReplica, syncReplica } from "./sync/replica";
 import { readUnreadPage } from "./sync/unread-repository";
 import { formatRelativeTime } from "./time";
 
@@ -279,19 +282,39 @@ function removeArticleFromSavedCache(
 }
 
 /**
- * Options de mutation pour la bascule Saved↔non-Saved (`PATCH /articles/:id`).
- * Mise à jour optimiste : flip de l'étoile dans toutes les listes, et retrait
- * de la vue Saved quand on désauve. `onSettled` réconcilie ensuite la vue Saved
- * avec le serveur : un article sauvé ailleurs (cache Saved jamais alimenté par
- * le flip) y devient visible, et un désauvage échoué y réapparaît.
+ * Sync montante offline-safe (#74, ADR 0018). La mutation a déjà écrit le réplica
+ * + le cache + empilé l'outbox dans `onMutate` ; le `mutationFn` ne fait que
+ * **tenter** un flush best-effort vers l'API et **réussit toujours localement** —
+ * un `apiFetch` qui rejette hors-ligne ne doit pas faire échouer l'UX. Le moteur
+ * de sync (`runSync`) flushe l'outbox push-avant-pull ; on délègue donc à
+ * `syncReplica()` (qui pousse l'outbox avant de pull) et on avale l'erreur réseau.
+ * À la reconnexion (event `online`/focus), la passe de sync re-flushera l'outbox.
+ */
+async function flushBestEffort(): Promise<void> {
+  try {
+    await syncReplica();
+  } catch {
+    // Hors-ligne / 401 : l'entrée reste en outbox, re-flushée à la reconnexion.
+  }
+}
+
+/**
+ * Options de mutation pour la bascule Saved↔non-Saved.
+ *
+ * **Local-first (#74, ADR 0018)** : `onMutate` applique l'état optimistement au
+ * **réplica** (source de la vue non-lus local-first), au **cache react-query**
+ * (vues feed/folder/saved encore servies par l'API jusqu'à #73), puis **empile
+ * l'outbox** (push à la reconnexion). Le `mutationFn` est offline-safe (flush
+ * best-effort). `onSettled` réconcilie la vue Saved avec le serveur.
  */
 export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: ({ id, saved }: { id: string; saved: boolean }) =>
-      apiFetch<ArticlePatchResponse>(`/articles/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ saved }),
-      }),
+    mutationFn: async ({ saved: _saved }: { id: string; saved: boolean }) => {
+      // Tout est déjà écrit localement (onMutate) ; on ne fait que pousser au
+      // mieux. Ne rejette jamais hors-ligne (sinon onError annulerait l'optimisme).
+      await flushBestEffort();
+      return { ok: true } as const;
+    },
     onMutate: async ({ id, saved }: { id: string; saved: boolean }) => {
       const detailKey = articleDetailQueryOptions(id).queryKey;
       await queryClient.cancelQueries({ queryKey: ARTICLES_LIST_KEY });
@@ -300,9 +323,21 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
         queryKey: ARTICLES_LIST_KEY,
       });
       const previousDetail = queryClient.getQueryData<ArticleDetail>(detailKey);
+      // (1) Réplica (vue non-lus local-first) + (2) outbox (push montant).
+      const db = await getReplica();
+      await setArticleFieldInReplica(db, id, "saved", saved);
+      await enqueueOutbox(db, {
+        kind: "patch",
+        articleId: id,
+        field: "saved",
+        value: saved,
+      });
+      // (3) Caches react-query des vues encore servies par l'API (#73).
       setArticleSavedInListCaches(queryClient, id, saved);
       setArticleSavedInDetailCache(queryClient, id, saved);
       if (!saved) removeArticleFromSavedCache(queryClient, id);
+      // Rafraîchit la vue non-lus (qui relit le réplica fraîchement écrit).
+      void queryClient.invalidateQueries({ queryKey: UNREAD_LOCAL_QUERY_KEY });
       return { previous, previousDetail, detailKey };
     },
     onError: (
@@ -342,23 +377,40 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
 export type MarkReadScope = MarkReadRequest;
 
 /**
- * Options de mutation pour la bascule manuelle Read↔non-lu (`PATCH /articles/:id`).
- * Mise à jour optimiste des listes en cache, puis ré-alignement des compteurs.
+ * Options de mutation pour la bascule manuelle Read↔non-lu.
+ *
+ * **Local-first (#74, ADR 0018)** : `onMutate` écrit l'état Read au **réplica**
+ * (la vue non-lus local-first le reflète instantanément, même hors-ligne), au
+ * **cache react-query** (vues encore API, #73), puis **empile l'outbox**. C'est
+ * ce qui **résout la limitation déférée de #72** : la vue non-lus n'est plus
+ * « ressuscitée » par un refetch, car le réplica porte désormais l'état Read.
+ * Le `mutationFn` est offline-safe (flush best-effort, ne rejette pas hors-ligne).
  */
 export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: ({ id, read }: { id: string; read: boolean }) =>
-      apiFetch<ArticlePatchResponse>(`/articles/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ read }),
-      }),
+    mutationFn: async ({ read: _read }: { id: string; read: boolean }) => {
+      await flushBestEffort();
+      return { ok: true } as const;
+    },
     onMutate: async ({ id, read }: { id: string; read: boolean }) => {
       // Fige les refetch en vol, puis snapshot des listes pour pouvoir annuler.
       await queryClient.cancelQueries({ queryKey: ARTICLES_LIST_KEY });
       const previous = queryClient.getQueriesData({
         queryKey: ARTICLES_LIST_KEY,
       });
+      // (1) Réplica (vue non-lus local-first) + (2) outbox (push montant).
+      const db = await getReplica();
+      await setArticleFieldInReplica(db, id, "read", read);
+      await enqueueOutbox(db, {
+        kind: "patch",
+        articleId: id,
+        field: "read",
+        value: read,
+      });
+      // (3) Caches react-query des vues encore servies par l'API (#73).
       setArticleReadInListCaches(queryClient, id, read);
+      // Rafraîchit la vue non-lus (qui relit le réplica fraîchement écrit).
+      void queryClient.invalidateQueries({ queryKey: UNREAD_LOCAL_QUERY_KEY });
       return { previous };
     },
     onError: (
@@ -366,7 +418,7 @@ export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
       _vars: { id: string; read: boolean },
       context: { previous: [readonly unknown[], unknown][] } | undefined,
     ) => {
-      // Le serveur n'a rien changé : on restaure les listes d'avant la bascule.
+      // Garde-fou : si onMutate échoue, on restaure les listes d'avant la bascule.
       for (const [key, data] of context?.previous ?? []) {
         queryClient.setQueryData(key, data);
       }
@@ -378,17 +430,32 @@ export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
 }
 
 /**
- * Options de mutation pour « Tout marquer lu » (`POST /articles/mark-read`).
- * Changement de masse → on invalide listes et compteurs plutôt que de patcher.
+ * Options de mutation pour « Tout marquer lu » sur une portée (global/Feed/Folder).
+ *
+ * **Local-first (#74, ADR 0018)** : `onMutate` marque `read=true` sur les articles
+ * de la portée dans le **réplica** (la vue non-lus se vide instantanément, même
+ * hors-ligne), puis **empile une SEULE entrée `markRead`** dans l'outbox — rejouée
+ * en **une seule** requête `POST /articles/mark-read {scope}` (pas N patchs).
+ * Les caches react-query des vues encore API (#73) sont invalidés. Le `mutationFn`
+ * est offline-safe (flush best-effort).
  */
 export function markAllReadMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: (scope: MarkReadScope) =>
-      apiFetch<MarkReadResponse>("/articles/mark-read", {
-        method: "POST",
-        body: JSON.stringify(scope),
-      }),
-    onSuccess: () => {
+    mutationFn: async (_scope: MarkReadScope) => {
+      await flushBestEffort();
+      return { ok: true } as const;
+    },
+    onMutate: async (scope: MarkReadScope) => {
+      // (1) Réplica : marque la portée (vue non-lus local-first).
+      const db = await getReplica();
+      await markReadInReplica(db, scope);
+      // (2) Outbox : UNE entrée de portée (push en une requête, pas N patchs).
+      await enqueueOutbox(db, { kind: "markRead", scope });
+      // (3) Rafraîchit la vue non-lus + invalide les vues encore API (#73).
+      void queryClient.invalidateQueries({ queryKey: UNREAD_LOCAL_QUERY_KEY });
+    },
+    onSettled: () => {
+      // Vues encore servies par l'API (#73) + compteurs : ré-alignement serveur.
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
     },

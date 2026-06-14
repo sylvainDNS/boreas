@@ -1,6 +1,8 @@
 import "fake-indexeddb/auto";
 import type { SyncArticle, SyncResponse } from "@boreas/api-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api";
+import { enqueueOutbox, type PushOutbox, readOutbox } from "./outbox-store";
 import {
   deleteReplica,
   openReplica,
@@ -141,6 +143,57 @@ describe("sync-engine — curseur périmé (stale)", () => {
     expect(await db.get("articles", "vieux")).toBeUndefined();
     expect(await db.get("articles", "neuf")).toBeDefined();
     expect(await readSyncCursor(db)).toBe(12000);
+  });
+});
+
+describe("sync-engine — push-avant-pull (#74)", () => {
+  it("flushe l'outbox AVANT de pull le delta", async () => {
+    await enqueueOutbox(db, {
+      kind: "patch",
+      articleId: "a1",
+      field: "read",
+      value: true,
+    });
+
+    const order: string[] = [];
+    const push: PushOutbox = vi.fn(async () => {
+      order.push("push");
+    });
+    const pull = vi.fn(async () => {
+      order.push("pull");
+      return emptyPage({ cursor: 100 });
+    });
+
+    await runSync(db, pull, push);
+
+    expect(order).toEqual(["push", "pull"]);
+    // L'entrée poussée est ackée.
+    expect(await readOutbox(db)).toHaveLength(0);
+  });
+
+  it("sur 401 au push : n'enchaîne PAS le pull et conserve l'outbox", async () => {
+    await enqueueOutbox(db, {
+      kind: "patch",
+      articleId: "a1",
+      field: "read",
+      value: true,
+    });
+
+    const push: PushOutbox = vi.fn(async () => {
+      throw new ApiError(401);
+    });
+    const pull = vi.fn(async () => emptyPage());
+
+    await expect(runSync(db, pull, push)).rejects.toBeInstanceOf(ApiError);
+    expect(pull).not.toHaveBeenCalled();
+    // Outbox conservée : re-flush après ré-auth.
+    expect(await readOutbox(db)).toHaveLength(1);
+  });
+
+  it("outbox vide : pull normal (pas d'appel push)", async () => {
+    const push: PushOutbox = vi.fn(async () => {});
+    await runSync(db, async () => emptyPage({ cursor: 1 }), push);
+    expect(push).not.toHaveBeenCalled();
   });
 });
 

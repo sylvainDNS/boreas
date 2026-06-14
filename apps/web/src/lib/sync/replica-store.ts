@@ -10,8 +10,10 @@ import { type DBSchema, type IDBPDatabase, openDB } from "idb";
 /**
  * Réplica local IndexedDB (#72, ADR 0018) : la copie locale des métadonnées que
  * l'UI lit **toujours** (local-first), alimentée par le moteur de sync. Seul le
- * moteur de sync écrit ici via `applyDelta` ; les vues lisent via le repository
- * (`articles.ts`). Le contenu HTML et les images n'y vivent PAS (#75/#77).
+ * moteur de sync écrit ici (`applyDelta`, pré-téléchargement du contenu) ; les
+ * vues lisent via le repository (`articles.ts`). Depuis #75, le **HTML** des
+ * articles vit ici (store `content`), récupéré par batch sans effet Read ; les
+ * images, elles, restent en Cache Storage du service worker (#77).
  */
 
 /** Nom de la base IndexedDB du réplica. */
@@ -19,10 +21,11 @@ export const REPLICA_DB_NAME = "boreas-replica";
 
 /**
  * Version du schéma d'objets (à incrémenter pour toute migration de stores).
- * v2 (#74) : ajout du store `outbox` (sync montante). Les stores existants sont
- * inchangés — la migration ne fait que créer le nouveau store.
+ * v2 (#74) : ajout du store `outbox` (sync montante).
+ * v3 (#75) : ajout du store `content` (HTML par id d'article, lecture hors-ligne).
+ * Les stores existants sont inchangés — chaque migration ne crée que son store.
  */
-const REPLICA_DB_VERSION = 2;
+const REPLICA_DB_VERSION = 3;
 
 /** Clé du curseur de sync (`since`) dans le store `meta`. */
 const SYNC_CURSOR_KEY = "syncCursor";
@@ -71,9 +74,22 @@ interface OutboxMarkRead {
 }
 
 /**
+ * Enregistrement du store `content` (#75, ADR 0018) : le HTML extrait/sanitizé
+ * d'un article, par id. `html` peut être `null` (article sans contenu extrait) ;
+ * **la présence de la clé** vaut « déjà téléchargé », distincte d'un id jamais
+ * récupéré (cf. `missingContentIds`) — pour ne pas re-télécharger en boucle un
+ * article qui n'a pas de contenu.
+ */
+export interface ReplicaContent {
+  id: string;
+  html: string | null;
+}
+
+/**
  * Schéma typé du réplica. `meta` porte le curseur de sync (et, plus tard,
  * d'autres scalaires). Le store `outbox` (#74, sync montante) empile les
  * mutations locales en attente de push, clé `seq` auto-incrémentée (ordre FIFO).
+ * Le store `content` (#75) stocke le HTML par id d'article (lecture hors-ligne).
  */
 interface ReplicaSchema extends DBSchema {
   articles: {
@@ -85,6 +101,7 @@ interface ReplicaSchema extends DBSchema {
   folders: { key: string; value: SyncFolder };
   meta: { key: string; value: { key: string; value: unknown } };
   outbox: { key: number; value: OutboxEntry };
+  content: { key: string; value: ReplicaContent };
 }
 
 /** Handle de base typé du réplica. */
@@ -129,6 +146,11 @@ export function openReplica(): Promise<ReplicaDb> {
       if (oldVersion < 2) {
         db.createObjectStore("outbox", { keyPath: "seq", autoIncrement: true });
       }
+      // v3 : store du contenu HTML par id d'article (#75, lecture hors-ligne).
+      // Alimenté par le pré-téléchargement du moteur de sync (batch sans Read).
+      if (oldVersion < 3) {
+        db.createObjectStore("content", { keyPath: "id" });
+      }
     },
   });
 }
@@ -152,7 +174,7 @@ export function deleteReplica(): Promise<void> {
  */
 export async function clearReplica(db: ReplicaDb): Promise<void> {
   const tx = db.transaction(
-    ["articles", "feeds", "folders", "meta"],
+    ["articles", "feeds", "folders", "meta", "content"],
     "readwrite",
   );
   await Promise.all([
@@ -160,6 +182,9 @@ export async function clearReplica(db: ReplicaDb): Promise<void> {
     tx.objectStore("feeds").clear(),
     tx.objectStore("folders").clear(),
     tx.objectStore("meta").clear(),
+    // Le contenu HTML suit le wipe : sur curseur périmé, les métadonnées seront
+    // resynchronisées et le contenu re-téléchargé (corpus non-lus ∪ Saved).
+    tx.objectStore("content").clear(),
   ]);
   await tx.done;
 }
@@ -245,4 +270,55 @@ export async function pendingArticleIds(db: ReplicaDb): Promise<Set<string>> {
     if (entry.kind === "patch") ids.add(entry.articleId);
   }
   return ids;
+}
+
+// --- Store content (HTML hors-ligne, #75, ADR 0018) ---
+
+/**
+ * Lit le HTML d'un article depuis le store `content`. Renvoie :
+ *  - `string` : le HTML extrait,
+ *  - `null` : la clé existe mais sans contenu (article sans extraction),
+ *  - `undefined` : aucune entrée — le contenu n'a jamais été téléchargé.
+ * Le lecteur local-first distingue le `null` (contenu indisponible, propose
+ * l'original) de l'`undefined` (à pré-télécharger / pas encore synchronisé).
+ */
+export async function readArticleContent(
+  db: ReplicaDb,
+  id: string,
+): Promise<string | null | undefined> {
+  const row = await db.get("content", id);
+  return row === undefined ? undefined : row.html;
+}
+
+/** Écrit (upsert) le HTML d'un article dans le store `content`. */
+export async function writeArticleContent(
+  db: ReplicaDb,
+  id: string,
+  html: string | null,
+): Promise<void> {
+  await db.put("content", { id, html });
+}
+
+/**
+ * Ids du **corpus offline** (#75, ADR 0018) : articles **non-lus ∪ Saved**, cible
+ * du pré-téléchargement de contenu. Un article lu non-Saved en est exclu (son
+ * contenu sera évincé par le GC, #81). Lit l'ensemble des métadonnées une fois.
+ */
+export async function unreadOrSavedIds(db: ReplicaDb): Promise<string[]> {
+  const all = await db.getAll("articles");
+  return all.filter((a) => !a.read || a.saved).map((a) => a.id);
+}
+
+/**
+ * Parmi `ids`, ceux **absents** du store `content` (jamais téléchargés) : la
+ * cible du pré-téléchargement du moteur de sync. Un id dont la clé existe (même
+ * `html: null`) n'est PAS manquant — on ne re-télécharge pas un article sans
+ * contenu extrait. Lit l'ensemble des clés présentes une seule fois.
+ */
+export async function missingContentIds(
+  db: ReplicaDb,
+  ids: string[],
+): Promise<string[]> {
+  const present = new Set(await db.getAllKeys("content"));
+  return ids.filter((id) => !present.has(id));
 }

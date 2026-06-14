@@ -13,6 +13,7 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { apiFetch } from "./api";
+import { readArticleDetail } from "./sync/article-detail-repository";
 import {
   enqueueOutbox,
   markReadInReplica,
@@ -61,13 +62,28 @@ export function toArticle(dto: ArticleListItem): Article {
 export type ArticleDetail = ArticleDetailResponse;
 
 /**
- * Query du contenu plein d'un Article. Le serveur **marque l'Article Read** au
- * GET (#7) : à la réussite, le lecteur retire l'état non-lu du cache de la liste.
+ * Query du contenu plein d'un Article — **local-first (#75, ADR 0018)**.
+ *
+ * Le `queryFn` lit d'abord le **réplica** (métadonnées) + le **store content**
+ * (HTML pré-téléchargé par le moteur de sync, sans effet Read) : un article du
+ * corpus offline (non-lus ∪ Saved) s'ouvre alors **hors-ligne sans l'avoir jamais
+ * ouvert**. Faute de local suffisant (métadonnées absentes, ou contenu jamais
+ * téléchargé — typiquement un deep-link hors corpus), on retombe sur l'**API**
+ * (`GET /api/articles/:id`, qui ne marque plus Read depuis #75).
+ *
+ * Le marquage Read **à l'ouverture** n'est plus un effet de ce GET : c'est une
+ * mutation client explicite déclenchée par `ReaderPane` (outbox, #74).
  */
 export function articleDetailQueryOptions(id: string) {
   return queryOptions({
     queryKey: ["articles", "detail", id],
-    queryFn: () => apiFetch<ArticleDetail>(`/articles/${id}`),
+    queryFn: async () => {
+      const local = await readArticleDetail(await getReplica(), id);
+      if (local) return local;
+      // Fallback réseau : article hors du corpus local (deep-link/refresh) ou
+      // contenu pas encore synchronisé. Le GET ne marque plus Read (#75).
+      return apiFetch<ArticleDetail>(`/articles/${id}`);
+    },
   });
 }
 

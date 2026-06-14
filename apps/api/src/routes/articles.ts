@@ -1,8 +1,10 @@
 import {
+  type ArticleContentResponse,
   type ArticleCountsResponse,
   type ArticleDetailResponse,
   type ArticleListResponse,
   type ArticlePatchResponse,
+  articleContentRequestSchema,
   articleFilterSchema,
   articlePatchSchema,
   decodeArticleCursor,
@@ -264,10 +266,77 @@ articlesRoutes.post("/mark-read", async (c) => {
 });
 
 /**
+ * Lit le HTML extrait/sanitizé (R2) d'une `content_key`, en dégradant en `null`
+ * (objet absent ou panne R2 transitoire) plutôt qu'en erreur : le SPA propose
+ * alors l'original. `content_key` null/absent ⇒ `null` directement.
+ */
+async function readArticleHtml(
+  env: Env,
+  contentKey: string | null,
+): Promise<string | null> {
+  if (!contentKey) return null;
+  try {
+    const obj = await env.BUCKET.get(contentKey);
+    return obj ? await obj.text() : null;
+  } catch (err) {
+    console.error("[articles] lecture du contenu R2 échouée", err);
+    return null;
+  }
+}
+
+/**
+ * Batch de contenu HTML hors-ligne (#75, ADR 0018) : `POST /api/articles/content
+ * {ids[]}` → `[{id, html}]`. Le moteur de sync l'appelle pour pré-télécharger le
+ * corpus offline (non-lus ∪ Saved) **sans effet de bord Read** — c'est ce qui
+ * distingue ce batch du `GET /:id` et permet de pré-charger les non-lus sans les
+ * passer en lus (AC#2). Les ids inconnus sont omis ; un objet R2 absent ⇒ `html:
+ * null` (dégradation, pas d'erreur).
+ *
+ * Déclaré **avant** `GET /:id` pour la lisibilité (même convention que `/counts`,
+ * `/mark-read`), même si la méthode POST suffirait déjà à le désambiguïser.
+ */
+articlesRoutes.post("/content", async (c) => {
+  const parsed = articleContentRequestSchema.safeParse(
+    await c.req.json().catch(() => ({})),
+  );
+  if (!parsed.success) {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const { ids } = parsed.data;
+  if (ids.length === 0) {
+    return c.json([] satisfies ArticleContentResponse);
+  }
+
+  const db = getDb(c.env.DB);
+  // On lit UNIQUEMENT les `content_key` (pas de jointure feed, pas d'écriture) :
+  // aucune mutation, donc aucun effet Read possible — la garantie centrale de #75.
+  const rows = await db
+    .select({ id: articles.id, contentKey: articles.content_key })
+    .from(articles)
+    .where(inArray(articles.id, ids));
+
+  // R2 en parallèle (endpoint chaud, lots de pré-chauffage). L'ordre de la réponse
+  // suit les lignes D1 trouvées ; les ids inconnus sont naturellement omis.
+  const result = await Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      html: await readArticleHtml(c.env, row.contentKey),
+    })),
+  );
+  return c.json(result satisfies ArticleContentResponse);
+});
+
+/**
  * Sert le contenu plein d'un Article : métadonnées (D1) + HTML extrait/sanitizé
- * (R2, écrit à l'ingestion, ADR 0003/0004). Ouvrir l'article le **marque Read**
- * (#7) ; le toggle manuel explicite arrive en #8. `content` vaut `null` si
- * l'extraction n'a rien produit (le SPA propose alors l'original).
+ * (R2, écrit à l'ingestion, ADR 0003/0004). `content` vaut `null` si l'extraction
+ * n'a rien produit (le SPA propose alors l'original).
+ *
+ * **#75 (ADR 0018)** : ce GET **ne marque plus Read** (effet de bord retiré, contrat
+ * #7 modifié). Le détail du lecteur est désormais lu **local-first** (réplica +
+ * store content côté SPA) et le Read devient une mutation client à l'ouverture
+ * (outbox) — sans quoi pré-télécharger le contenu des non-lus les passerait tous
+ * en Read. Cet endpoint reste fonctionnel comme **fallback** / usage tiers, sans
+ * effet de bord.
  */
 articlesRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
@@ -295,29 +364,7 @@ articlesRoutes.get("/:id", async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
 
-  // Un objet R2 absent (extraction sans contenu) ou une panne R2 transitoire ne
-  // doivent pas faire échouer la lecture : on dégrade en `content: null` (le SPA
-  // propose alors l'original) plutôt que de renvoyer une 500.
-  let content: string | null = null;
-  if (row.contentKey) {
-    try {
-      const obj = await c.env.BUCKET.get(row.contentKey);
-      content = obj ? await obj.text() : null;
-    } catch (err) {
-      console.error("[articles] lecture du contenu R2 échouée", err);
-    }
-  }
-
-  // Marque Read à l'ouverture (#7) ; on évite une écriture inutile si déjà lu.
-  // Cette bascule Read est une mutation de domaine : elle bumpe `updated_at`
-  // (#69, ADR 0018). Quand l'article est déjà lu, on n'écrit rien — donc pas de
-  // bump, cohérent avec « aucune mutation ».
-  if (!row.read) {
-    await db
-      .update(articles)
-      .set({ read: true, updated_at: nowEpochMs() })
-      .where(eq(articles.id, id));
-  }
+  const content = await readArticleHtml(c.env, row.contentKey);
 
   return c.json({
     id: row.id,
@@ -328,8 +375,8 @@ articlesRoutes.get("/:id", async (c) => {
     publishedAt: row.publishedAt,
     content,
     saved: row.saved,
-    // `unread` AVANT le marquage Read ci-dessus : le client sait ainsi si
-    // l'Article « était non-lu » pour invalider les compteurs.
+    // `unread` reflète l'état Read courant (le GET ne marque plus Read, #75) :
+    // le client lit le détail sans muter, le Read passe par l'outbox à l'ouverture.
     unread: !row.read,
   } satisfies ArticleDetailResponse);
 });

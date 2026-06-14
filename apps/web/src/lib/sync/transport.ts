@@ -1,5 +1,7 @@
 import {
+  type ArticleContentResponse,
   type ArticlePatchResponse,
+  articleContentResponseSchema,
   type MarkReadResponse,
   type SyncResponse,
   syncResponseSchema,
@@ -20,6 +22,22 @@ export async function pullSyncDelta(since: number): Promise<SyncResponse> {
   const query = since > 0 ? `?since=${since}` : "";
   const body = await apiFetch<unknown>(`/sync${query}`);
   return syncResponseSchema.parse(body);
+}
+
+/**
+ * Pull le HTML d'un lot d'articles (#75, ADR 0018) : `POST /api/articles/content
+ * {ids[]}` → `[{id, html}]`, **sans effet Read**. Appelé par le moteur de sync
+ * pour pré-télécharger le corpus offline (non-lus ∪ Saved). Validation zod (le
+ * wire est la frontière de confiance, comme pour le pull du delta).
+ */
+export async function pullArticleContent(
+  ids: string[],
+): Promise<ArticleContentResponse> {
+  const body = await apiFetch<unknown>("/articles/content", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+  return articleContentResponseSchema.parse(body);
 }
 
 /**

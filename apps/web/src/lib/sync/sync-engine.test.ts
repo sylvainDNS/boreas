@@ -7,9 +7,10 @@ import {
   deleteReplica,
   openReplica,
   type ReplicaDb,
+  readArticleContent,
   readSyncCursor,
 } from "./replica-store";
-import { runSync } from "./sync-engine";
+import { type FetchContent, runSync } from "./sync-engine";
 
 function art(id: string, read = false): SyncArticle {
   return {
@@ -207,5 +208,118 @@ describe("sync-engine — robustesse", () => {
     ).rejects.toThrow("offline");
     // Le curseur reste sur la dernière sync réussie.
     expect(await readSyncCursor(db)).toBe(500);
+  });
+});
+
+describe("sync-engine — pré-téléchargement du contenu (#75)", () => {
+  it("pré-télécharge le HTML des non-lus ∪ Saved manquant et le stocke", async () => {
+    const pull = vi.fn(async () =>
+      emptyPage({
+        upserts: {
+          articles: [
+            art("unread-1", false),
+            { ...art("saved-1", true), saved: true },
+            art("read-1", true), // lu non-Saved : hors corpus offline
+          ],
+          feeds: [],
+          folders: [],
+        },
+        cursor: 100,
+      }),
+    );
+
+    const requested: string[][] = [];
+    const fetchContent: FetchContent = vi.fn(async (ids: string[]) => {
+      requested.push([...ids].sort());
+      return ids.map((id) => ({ id, html: `<p>${id}</p>` }));
+    });
+
+    await runSync(db, pull, undefined, fetchContent);
+
+    // Le corpus ciblé = non-lus ∪ Saved (pas le lu non-Saved).
+    expect(requested).toEqual([["saved-1", "unread-1"]]);
+    expect(await readArticleContent(db, "unread-1")).toBe("<p>unread-1</p>");
+    expect(await readArticleContent(db, "saved-1")).toBe("<p>saved-1</p>");
+    expect(await readArticleContent(db, "read-1")).toBeUndefined();
+  });
+
+  it("ne re-télécharge pas un contenu déjà en store", async () => {
+    // 1ère passe : télécharge unread-1.
+    const pull1 = vi.fn(async () =>
+      emptyPage({
+        upserts: { articles: [art("unread-1", false)], feeds: [], folders: [] },
+        cursor: 100,
+      }),
+    );
+    const fetch1: FetchContent = vi.fn(async (ids: string[]) =>
+      ids.map((id) => ({ id, html: `<p>${id}</p>` })),
+    );
+    await runSync(db, pull1, undefined, fetch1);
+
+    // 2ᵉ passe : unread-1 toujours non-lu, mais déjà en store → pas de re-fetch.
+    const pull2 = vi.fn(async () => emptyPage({ cursor: null }));
+    const fetch2: FetchContent = vi.fn(async (ids: string[]) =>
+      ids.map((id) => ({ id, html: `<p>${id}</p>` })),
+    );
+    await runSync(db, pull2, undefined, fetch2);
+
+    expect(fetch2).not.toHaveBeenCalled();
+  });
+
+  it("stocke html:null pour un article sans contenu (et ne le re-demande pas)", async () => {
+    const pull = vi.fn(async () =>
+      emptyPage({
+        upserts: { articles: [art("u1", false)], feeds: [], folders: [] },
+        cursor: 100,
+      }),
+    );
+    const fetchContent: FetchContent = vi.fn(async (ids: string[]) =>
+      ids.map((id) => ({ id, html: null })),
+    );
+    await runSync(db, pull, undefined, fetchContent);
+
+    // Présent (clé écrite) avec html null → ne sera plus re-demandé.
+    expect(await readArticleContent(db, "u1")).toBeNull();
+  });
+
+  it("avale silencieusement une erreur réseau du pré-téléchargement (offline)", async () => {
+    const pull = vi.fn(async () =>
+      emptyPage({
+        upserts: { articles: [art("u1", false)], feeds: [], folders: [] },
+        cursor: 100,
+      }),
+    );
+    const fetchContent: FetchContent = vi.fn(async () => {
+      throw new Error("offline");
+    });
+
+    // Le pré-téléchargement ne doit pas faire échouer la sync (delta déjà appliqué).
+    await expect(
+      runSync(db, pull, undefined, fetchContent),
+    ).resolves.toBeUndefined();
+    expect(await readSyncCursor(db)).toBe(100);
+    expect(await readArticleContent(db, "u1")).toBeUndefined();
+  });
+
+  it("borne le batch (lots successifs) pour un gros corpus", async () => {
+    const many = Array.from({ length: 70 }, (_, i) => art(`u${i}`, false));
+    const pull = vi.fn(async () =>
+      emptyPage({
+        upserts: { articles: many, feeds: [], folders: [] },
+        cursor: 100,
+      }),
+    );
+    const batchSizes: number[] = [];
+    const fetchContent: FetchContent = vi.fn(async (ids: string[]) => {
+      batchSizes.push(ids.length);
+      return ids.map((id) => ({ id, html: `<p>${id}</p>` }));
+    });
+
+    await runSync(db, pull, undefined, fetchContent);
+
+    // Plusieurs lots bornés (aucun > 50), couvrant les 70 articles.
+    expect(batchSizes.length).toBeGreaterThan(1);
+    expect(Math.max(...batchSizes)).toBeLessThanOrEqual(50);
+    expect(batchSizes.reduce((a, b) => a + b, 0)).toBe(70);
   });
 });

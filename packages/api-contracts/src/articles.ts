@@ -43,7 +43,16 @@ export const articleListResponseSchema = z.object({
 });
 export type ArticleListResponse = z.infer<typeof articleListResponseSchema>;
 
-/** `GET /api/articles/:id` — contenu plein du lecteur (#7). */
+/**
+ * `GET /api/articles/:id` — contenu plein du lecteur (#7).
+ *
+ * **#75 (ADR 0018)** : ce GET **ne marque plus Read** (l'effet de bord est retiré ;
+ * le Read devient une mutation client à l'ouverture, via l'outbox). Le détail du
+ * lecteur est désormais lu **local-first** (réplica + store content) ; cet endpoint
+ * reste fonctionnel comme fallback / usage tiers, sans effet de bord. `unread`
+ * reflète donc l'état Read **courant** (plus « avant marquage », ce dernier
+ * n'existant plus).
+ */
 export const articleDetailResponseSchema = z.object({
   id: z.string(),
   /** Feed source (jointure stable) : permet au lecteur de lier le titre du Feed
@@ -56,7 +65,7 @@ export const articleDetailResponseSchema = z.object({
   content: z.string().nullable(),
   /** État Saved et non-lu : permet au lecteur de se rendre depuis le seul `id`
    *  (deep-link/refresh sur un Article hors de la page de liste chargée).
-   *  `unread` reflète l'état AVANT le marquage Read induit par ce GET. */
+   *  `unread` reflète l'état Read courant (le GET ne marque plus Read, #75). */
   saved: z.boolean(),
   unread: z.boolean(),
 });
@@ -81,3 +90,39 @@ export type ArticlePatchResponse = z.infer<typeof articlePatchResponseSchema>;
 /** `POST /api/articles/mark-read` — nombre d'articles basculés. */
 export const markReadResponseSchema = z.object({ updated: z.number() });
 export type MarkReadResponse = z.infer<typeof markReadResponseSchema>;
+
+/**
+ * `POST /api/articles/content` — batch de contenu HTML (#75, ADR 0018).
+ *
+ * Récupère le HTML extrait/sanitizé (R2) de plusieurs articles **en une requête**,
+ * **sans effet de bord Read** : le moteur de sync l'appelle pour pré-télécharger
+ * le corpus offline (non-lus ∪ Saved) sans passer ces articles en lus — c'est ce
+ * qui distingue ce batch du `GET /api/articles/:id` (dont l'effet Read est retiré
+ * en #75, le Read devenant une mutation client à l'ouverture).
+ */
+export const articleContentRequestSchema = z.object({
+  // Borné à la limite de variables liées de D1 (100) : le serveur exécute le batch
+  // via un `IN (…)` d'un paramètre par id, et ouvre un `BUCKET.get` R2 par id. Sans
+  // cette borne, un lot trop grand ferait échouer la requête D1 et laisserait le
+  // fan-out R2 non plafonné. Le client (moteur de sync) chunke déjà plus bas (50) ;
+  // ce max protège l'endpoint quel que soit l'appelant.
+  ids: z.array(z.string()).max(100),
+});
+export type ArticleContentRequest = z.infer<typeof articleContentRequestSchema>;
+
+/**
+ * Item de réponse du batch content : le HTML d'un article, ou `null` quand
+ * l'extraction n'a rien produit / l'objet R2 est absent (dégradation, pas
+ * d'erreur). Les ids inconnus ne figurent pas dans la réponse.
+ */
+export const articleContentItemSchema = z.object({
+  id: z.string(),
+  html: z.string().nullable(),
+});
+export type ArticleContentItem = z.infer<typeof articleContentItemSchema>;
+
+/** `POST /api/articles/content` — HTML des ids demandés (sans effet Read). */
+export const articleContentResponseSchema = z.array(articleContentItemSchema);
+export type ArticleContentResponse = z.infer<
+  typeof articleContentResponseSchema
+>;

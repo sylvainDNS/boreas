@@ -98,7 +98,7 @@ describe("GET /api/articles/:id — lecteur", () => {
     expect(res.status).toBe(401);
   });
 
-  it("sert le contenu stocké en R2 et marque l'Article Read", async () => {
+  it("sert le contenu stocké en R2 SANS marquer l'Article Read (#75)", async () => {
     const key = "articles/art-1.html";
     await env.BUCKET.put(key, "<p>Le vent du nord souffle.</p>");
     await seedArticle({ id: "art-1", contentKey: key });
@@ -118,14 +118,14 @@ describe("GET /api/articles/:id — lecteur", () => {
     expect(body.feedName).toBe("Mon flux");
     expect(body.content).toBe("<p>Le vent du nord souffle.</p>");
 
-    // L'ouverture marque l'Article Read.
+    // #75 : le GET ne marque PLUS Read (le Read passe côté client à l'ouverture).
     const row = await env.DB.prepare("SELECT read FROM articles WHERE id = ?")
       .bind("art-1")
       .first<{ read: number }>();
-    expect(row?.read).toBe(1);
+    expect(row?.read).toBe(0);
   });
 
-  it("renvoie saved + unread (unread reflète l'état AVANT le marquage Read)", async () => {
+  it("renvoie saved + unread (état Read courant, le GET ne marque plus Read #75)", async () => {
     await seedArticle({
       id: "art-su",
       contentKey: null,
@@ -136,10 +136,9 @@ describe("GET /api/articles/:id — lecteur", () => {
     const res = await SELF.fetch(`${ORIGIN}/api/articles/art-su`, authed());
     expect(res.status).toBe(200);
     const body = (await res.json()) as { saved: boolean; unread: boolean };
-    // `unread` = état pré-marquage : le client sait ainsi qu'il était non-lu
-    // (pour invalider les compteurs), bien que ce GET vienne de le passer Read.
+    // `unread` reflète l'état Read courant : l'article reste non-lu après le GET.
     expect(body).toMatchObject({ saved: true, unread: true });
-    expect(await readState("art-su")).toBe(1);
+    expect(await readState("art-su")).toBe(0);
   });
 
   it("renvoie content:null quand l'article n'a pas de contenu extrait", async () => {
@@ -162,7 +161,7 @@ describe("GET /api/articles/:id — lecteur", () => {
     ).toBeNull();
   });
 
-  it("reste 200 et marqué lu en ré-ouvrant un article déjà lu", async () => {
+  it("laisse Read inchangé en ouvrant un article déjà lu (#75)", async () => {
     await seedArticle({ id: "art-4", contentKey: null, read: true });
 
     const res = await SELF.fetch(`${ORIGIN}/api/articles/art-4`, authed());
@@ -173,10 +172,132 @@ describe("GET /api/articles/:id — lecteur", () => {
     expect(row?.read).toBe(1);
   });
 
+  it("ouvrir N non-lus via GET /:id ne les passe pas en Read (#75, AC#2)", async () => {
+    await seedArticle({ id: "art-n1", read: false });
+    await seedArticle({ id: "art-n2", read: false });
+
+    await SELF.fetch(`${ORIGIN}/api/articles/art-n1`, authed());
+    await SELF.fetch(`${ORIGIN}/api/articles/art-n2`, authed());
+
+    expect(await readState("art-n1")).toBe(0);
+    expect(await readState("art-n2")).toBe(0);
+  });
+
   it("renvoie 404 pour un article inconnu", async () => {
     const res = await SELF.fetch(`${ORIGIN}/api/articles/inexistant`, authed());
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });
+  });
+});
+
+describe("POST /api/articles/content — batch HTML hors-ligne (#75)", () => {
+  it("refuse l'accès sans session (garde)", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/articles/content`, {
+      method: "POST",
+      body: JSON.stringify({ ids: ["art-1"] }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("renvoie le HTML R2 des ids demandés, SANS marquer Read (#75)", async () => {
+    await env.BUCKET.put("articles/art-1.html", "<p>Un</p>");
+    await env.BUCKET.put("articles/art-2.html", "<p>Deux</p>");
+    await seedArticle({
+      id: "art-1",
+      contentKey: "articles/art-1.html",
+      read: false,
+    });
+    await seedArticle({
+      id: "art-2",
+      contentKey: "articles/art-2.html",
+      read: false,
+    });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({
+        method: "POST",
+        body: JSON.stringify({ ids: ["art-1", "art-2"] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; html: string | null }[];
+    const byId = Object.fromEntries(body.map((r) => [r.id, r.html]));
+    expect(byId).toEqual({
+      "art-1": "<p>Un</p>",
+      "art-2": "<p>Deux</p>",
+    });
+    // Garantie clé : aucun des articles n'est passé Read par le batch.
+    expect(await readState("art-1")).toBe(0);
+    expect(await readState("art-2")).toBe(0);
+  });
+
+  it("renvoie html:null quand l'article n'a pas de content_key", async () => {
+    await seedArticle({ id: "art-1", contentKey: null });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({ method: "POST", body: JSON.stringify({ ids: ["art-1"] }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([{ id: "art-1", html: null }]);
+  });
+
+  it("dégrade en html:null si l'objet R2 est absent (sans 500)", async () => {
+    // Clé jamais écrite en R2 (buckets miniflare persistants entre cas du fichier).
+    await seedArticle({
+      id: "art-1",
+      contentKey: "articles/art-1-missing.html",
+    });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({ method: "POST", body: JSON.stringify({ ids: ["art-1"] }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([{ id: "art-1", html: null }]);
+  });
+
+  it("ignore les ids inconnus (absents de la réponse)", async () => {
+    await env.BUCKET.put("articles/art-1.html", "<p>Un</p>");
+    await seedArticle({ id: "art-1", contentKey: "articles/art-1.html" });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({
+        method: "POST",
+        body: JSON.stringify({ ids: ["art-1", "inconnu"] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string }[];
+    expect(body.map((r) => r.id)).toEqual(["art-1"]);
+  });
+
+  it("renvoie un tableau vide pour une liste d'ids vide", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({ method: "POST", body: JSON.stringify({ ids: [] }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it("renvoie 400 sur un corps invalide", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({ method: "POST", body: JSON.stringify({ ids: "art-1" }) }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("n'est pas capturé par la route /:id (POST vs GET, et chemin distinct)", async () => {
+    // `content` ne doit pas être interprété comme un id d'article.
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/articles/content`,
+      authed({ method: "POST", body: JSON.stringify({ ids: [] }) }),
+    );
+    expect(res.status).toBe(200);
   });
 });
 
@@ -569,22 +690,13 @@ describe("updated_at — bump des mutations de domaine (#71, ADR 0018)", () => {
     expect(after).toBeGreaterThan(1);
   });
 
-  it("l'ouverture (GET /:id) qui marque Read bumpe updated_at", async () => {
+  it("l'ouverture (GET /:id) ne marque plus Read → updated_at inchangé (#75)", async () => {
     await seedArticle({ id: "art-1", read: false });
-    await setUpdatedAt("art-1", 1);
-
-    await SELF.fetch(`${ORIGIN}/api/articles/art-1`, authed());
-
-    expect(await updatedAt("art-1")).toBeGreaterThan(1);
-  });
-
-  it("rouvrir un article déjà lu ne réécrit pas updated_at (pas de Read)", async () => {
-    await seedArticle({ id: "art-1", read: true });
     await setUpdatedAt("art-1", 42);
 
     await SELF.fetch(`${ORIGIN}/api/articles/art-1`, authed());
 
-    // Aucune écriture Read → updated_at inchangé (cohérent : pas de mutation).
+    // #75 : le GET n'écrit rien (le Read passe côté client) → pas de bump.
     expect(await updatedAt("art-1")).toBe(42);
   });
 

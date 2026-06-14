@@ -5,13 +5,12 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import {
-  ARTICLES_COUNTS_KEY,
   type Article,
   type ArticleDetail,
   articleDetailQueryOptions,
-  setArticleReadInListCaches,
+  toggleArticleReadMutationOptions,
   toggleArticleSavedMutationOptions,
 } from "../lib/articles";
 import { formatRelativeTime } from "../lib/time";
@@ -31,10 +30,14 @@ const feedTagClass =
  * Panneau lecteur, piloté par `articleId` (search param `?article`, ADR 0016).
  * En-tête : préfère `listItem` (métadonnées de la liste, rendu instantané au clic)
  * et retombe sur la query détail quand l'item n'est pas dans la page chargée
- * (deep-link/refresh). Contenu plein chargé via `GET /api/articles/:id` ; ce GET
- * marque l'Article Read côté serveur (#7) → à la réussite, on retire l'état
- * non-lu du cache de la liste. Le HTML rendu est sûr par construction
- * (sanitization serveur, ADR 0007).
+ * (deep-link/refresh). Contenu plein lu **local-first** (réplica + store content,
+ * #75) avec repli API. Le HTML rendu est sûr par construction (sanitization
+ * serveur, ADR 0007).
+ *
+ * **Read à l'ouverture (#75, ADR 0018)** : ouvrir un article le marque Read **côté
+ * client** via l'outbox (mutation `toggleArticleReadMutationOptions`, #74),
+ * répercuté au serveur à la reconnexion. Le `GET` ne marque plus Read (effet
+ * retiré) ; sans quoi pré-télécharger les non-lus les passerait tous en lus.
  */
 export function ReaderPane({
   articleId,
@@ -48,21 +51,26 @@ export function ReaderPane({
   const toggleSaved = useMutation(
     toggleArticleSavedMutationOptions(queryClient),
   );
+  const toggleRead = useMutation(toggleArticleReadMutationOptions(queryClient));
 
-  // « Était non-lu » : item de liste si présent (connu avant le GET), sinon
-  // l'état pré-marquage renvoyé par le détail (disponible à la réussite).
-  const wasUnread = listItem?.unread ?? detail.data?.unread ?? false;
+  // « Est non-lu » : item de liste si présent (connu au clic), sinon l'état du
+  // détail (réplica/API). Le `?? undefined` distingue « pas encore connu » d'un
+  // `false` certain : on ne marque Read que sur un `true` avéré.
+  const isUnread = listItem?.unread ?? detail.data?.unread;
+  // Marque Read **une seule fois** par article ouvert, et seulement s'il était
+  // non-lu — cohérent avec l'ancien `if (!row.read)` serveur : pas d'écriture ni
+  // d'entrée outbox superflue en rouvrant un article déjà lu. Le ref évite de
+  // rejouer la mutation à chaque re-rendu (et de re-marquer après désabonnement).
+  const markedOpen = useRef<string | null>(null);
+  const mutateRead = toggleRead.mutate;
   useEffect(() => {
-    // N'aligne le cache que si l'article était non-lu : le GET du détail vient
-    // de le marquer Read côté serveur (#7). Rouvrir un article déjà lu n'a rien
-    // changé en base — inutile de repatcher les listes ni d'invalider les
-    // compteurs (#8). En deep-link, l'article peut n'être dans aucune liste en
-    // cache : le patch est alors un no-op, seule l'invalidation des compteurs agit.
-    if (detail.isSuccess && wasUnread) {
-      setArticleReadInListCaches(queryClient, articleId, true);
-      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+    if (isUnread === true && markedOpen.current !== articleId) {
+      markedOpen.current = articleId;
+      // Écrit réplica + outbox + caches (la vue non-lus reflète le Read, même
+      // hors-ligne ; le serveur le reçoit à la reconnexion).
+      mutateRead({ id: articleId, read: true });
     }
-  }, [detail.isSuccess, articleId, wasUnread, queryClient]);
+  }, [isUnread, articleId, mutateRead]);
 
   // Tant qu'on n'a ni item de liste ni détail, rien à afficher : état chargement
   // plein-panneau (cas deep-link à froid) plutôt qu'un en-tête vide clignotant.

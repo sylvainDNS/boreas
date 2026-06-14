@@ -5,9 +5,12 @@ import { enqueueOutbox } from "./outbox-store";
 import {
   applyDelta,
   deleteReplica,
+  missingContentIds,
   openReplica,
   type ReplicaDb,
+  readArticleContent,
   readSyncCursor,
+  writeArticleContent,
   writeSyncCursor,
 } from "./replica-store";
 
@@ -218,6 +221,39 @@ describe("replica-store — applyDelta (protection des non-ackés, #74)", () => 
     });
 
     expect((await db.get("articles", "a1"))?.read).toBe(true);
+  });
+});
+
+describe("replica-store — store content (HTML hors-ligne, #75)", () => {
+  it("écrit et relit le HTML d'un article", async () => {
+    await writeArticleContent(db, "a1", "<p>Bonjour</p>");
+    expect(await readArticleContent(db, "a1")).toBe("<p>Bonjour</p>");
+  });
+
+  it("stocke un html null (article sans contenu extrait)", async () => {
+    await writeArticleContent(db, "a1", null);
+    // Présent (clé écrite) mais html null.
+    expect(await readArticleContent(db, "a1")).toBeNull();
+  });
+
+  it("renvoie undefined pour un article jamais téléchargé", async () => {
+    expect(await readArticleContent(db, "absent")).toBeUndefined();
+  });
+
+  it("missingContentIds ne renvoie que les ids absents du store content", async () => {
+    await writeArticleContent(db, "a1", "<p>Un</p>");
+    // a2 a une clé présente même avec html null → pas « manquant ».
+    await writeArticleContent(db, "a2", null);
+
+    const missing = await missingContentIds(db, ["a1", "a2", "a3", "a4"]);
+    expect(missing).toEqual(["a3", "a4"]);
+  });
+
+  it("clearReplica vide aussi le store content", async () => {
+    await writeArticleContent(db, "a1", "<p>Un</p>");
+    const { clearReplica } = await import("./replica-store");
+    await clearReplica(db);
+    expect(await readArticleContent(db, "a1")).toBeUndefined();
   });
 });
 

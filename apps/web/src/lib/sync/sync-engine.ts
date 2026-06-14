@@ -1,10 +1,16 @@
-import type { SyncResponse } from "@boreas/api-contracts";
+import type {
+  ArticleContentResponse,
+  SyncResponse,
+} from "@boreas/api-contracts";
 import { flushOutbox, type PushOutbox } from "./outbox-store";
 import {
   applyDelta,
   clearReplica,
+  missingContentIds,
   type ReplicaDb,
   readSyncCursor,
+  unreadOrSavedIds,
+  writeArticleContent,
   writeSyncCursor,
 } from "./replica-store";
 
@@ -18,6 +24,47 @@ import {
 
 /** Fonction de transport : pull une page de delta pour un `since` donné. */
 export type PullDelta = (since: number) => Promise<SyncResponse>;
+
+/**
+ * Fonction de transport du contenu (#75) : récupère le HTML d'un lot d'ids
+ * (`POST /api/articles/content`, sans effet Read). Le moteur l'appelle par lots
+ * bornés pour pré-télécharger le corpus offline (non-lus ∪ Saved).
+ */
+export type FetchContent = (ids: string[]) => Promise<ArticleContentResponse>;
+
+/**
+ * Taille de lot du pré-téléchargement de contenu : borne la taille du corps
+ * `POST /content` et le volume R2 par requête, sans plafonner le corpus total
+ * (réparti sur plusieurs lots).
+ */
+const CONTENT_BATCH_SIZE = 50;
+
+/**
+ * Pré-télécharge le HTML manquant du corpus offline (non-lus ∪ Saved) et le range
+ * dans le store `content` (#75, ADR 0018). N'appelle le réseau que pour les ids
+ * **absents** du store (pas de re-téléchargement), par lots bornés. Best-effort :
+ * une erreur réseau (hors-ligne) est **avalée** — la sync (delta déjà appliqué)
+ * ne doit pas échouer ; le contenu sera rapatrié à une passe ultérieure.
+ */
+async function prefetchContent(
+  db: ReplicaDb,
+  fetchContent: FetchContent,
+): Promise<void> {
+  try {
+    const corpus = await unreadOrSavedIds(db);
+    const missing = await missingContentIds(db, corpus);
+    for (let i = 0; i < missing.length; i += CONTENT_BATCH_SIZE) {
+      const batch = missing.slice(i, i + CONTENT_BATCH_SIZE);
+      const items = await fetchContent(batch);
+      for (const item of items) {
+        await writeArticleContent(db, item.id, item.html);
+      }
+    }
+  } catch {
+    // Hors-ligne / erreur réseau : on garde le delta déjà appliqué et on
+    // re-tentera le pré-téléchargement à la prochaine passe (focus/online).
+  }
+}
 
 /**
  * Défaut de `push` : **lève** dès qu'une entrée doit être poussée. Un push no-op
@@ -35,6 +82,17 @@ const pushRequired: PushOutbox = () => {
 };
 
 /**
+ * Défaut de `fetchContent` : **no-op** (à la différence de `pushRequired`). Le
+ * pré-téléchargement du contenu est **best-effort** et `prefetchContent` avale déjà
+ * toute erreur : omettre le transport n'entraîne donc **aucune perte de données**,
+ * ça désactive simplement le pré-chauffage offline. Un défaut qui lèverait serait
+ * une fausse symétrie avec `pushRequired` — le throw serait absorbé par le `catch`
+ * de `prefetchContent`, donc jamais observable. L'appelant de prod (`replica.ts`)
+ * passe toujours `pullArticleContent`.
+ */
+const noopFetchContent: FetchContent = async () => [];
+
+/**
  * Exécute une passe de sync complète :
  *  1. **push de l'outbox** (#74) : flush des mutations locales vers l'API, AVANT
  *     le pull. Sur `401`/réseau, l'erreur remonte ici sans drop d'entrée (l'outbox
@@ -42,15 +100,21 @@ const pushRequired: PushOutbox = () => {
  *  2. pull du delta depuis le curseur persisté (`null` ⇒ `since=0`, initiale),
  *     en enchaînant les pages tant que `complete` est faux ;
  *  3. application de chaque page au réplica + avancée du curseur ;
- *  4. sur `stale` (curseur périmé), wipe du réplica + resync complet depuis 0.
+ *  4. sur `stale` (curseur périmé), wipe du réplica + resync complet depuis 0 ;
+ *  5. **pré-téléchargement du contenu** (#75) : HTML des non-lus ∪ Saved manquant,
+ *     stocké en IndexedDB (best-effort, avalé hors-ligne) — la lecture devient
+ *     possible hors-ligne sans avoir ouvert l'article. Le Read n'étant plus un
+ *     effet du GET (#75), ce pré-chauffage ne passe AUCUN article en lu.
  *
- * Idempotente et sûre à rejouer (déclencheurs multiples) : un échec réseau
- * remonte tel quel sans avancer le curseur au-delà de la dernière page écrite.
+ * Idempotente et sûre à rejouer (déclencheurs multiples) : un échec réseau du
+ * pull remonte tel quel sans avancer le curseur au-delà de la dernière page
+ * écrite ; un échec du seul pré-téléchargement n'échoue pas la passe.
  */
 export async function runSync(
   db: ReplicaDb,
   pull: PullDelta,
   push: PushOutbox = pushRequired,
+  fetchContent: FetchContent = noopFetchContent,
 ): Promise<void> {
   // --- (1) Push de l'outbox AVANT le pull (push-avant-pull, ADR 0018) ---
   // En cas d'échec (401/réseau), `flushOutbox` propage : on ne pull pas, et les
@@ -87,6 +151,9 @@ export async function runSync(
       since = page.cursor;
     }
 
-    if (page.complete) return;
+    if (page.complete) break;
   }
+
+  // --- (5) Pré-téléchargement du contenu offline (#75), best-effort ---
+  await prefetchContent(db, fetchContent);
 }

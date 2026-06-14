@@ -1,4 +1,5 @@
 import type { SyncResponse } from "@boreas/api-contracts";
+import { flushOutbox, type PushOutbox } from "./outbox-store";
 import {
   applyDelta,
   clearReplica,
@@ -8,20 +9,36 @@ import {
 } from "./replica-store";
 
 /**
- * Moteur de sync descendante (#72, ADR 0018) : **seul** module à parler au
- * backend pour le réplica. Il pull le delta depuis `GET /api/sync?since=<curseur>`
- * et l'écrit dans le réplica local ; l'UI, elle, ne lit que le réplica (pas de
- * switch online/offline). La sync montante (outbox, #74) viendra se greffer
- * ici : `runSync` poussera l'outbox **avant** de pull — point d'extension laissé
- * en tête de la fonction, non implémenté ici.
+ * Moteur de sync (#72/#74, ADR 0018) : **seul** module à parler au backend pour
+ * le réplica. Une passe **pousse l'outbox AVANT de pull** le delta
+ * (push-avant-pull) : les mutations locales (Read/Saved/mark-all-read) partent en
+ * premier, puis on rapatrie le delta descendant. L'UI ne lit que le réplica (pas
+ * de switch online/offline).
  */
 
 /** Fonction de transport : pull une page de delta pour un `since` donné. */
 export type PullDelta = (since: number) => Promise<SyncResponse>;
 
 /**
+ * Défaut de `push` : **lève** dès qu'une entrée doit être poussée. Un push no-op
+ * « réussirait » chaque entrée et `flushOutbox` la supprimerait → **perte
+ * silencieuse** des mutations locales (Read/Saved/mark-all-read). Avec ce défaut,
+ * un appelant qui oublie `push` échoue bruyamment au lieu de vider l'outbox sans
+ * rien envoyer. L'unique appelant de prod (`replica.ts`) passe toujours
+ * `pushOutboxEntry` ; les passes de pull pur ont une outbox vide → le push n'est
+ * jamais invoqué, ce défaut n'est donc jamais atteint chez elles.
+ */
+const pushRequired: PushOutbox = () => {
+  throw new Error(
+    "runSync: argument `push` manquant alors que l'outbox contient des entrées à flusher",
+  );
+};
+
+/**
  * Exécute une passe de sync complète :
- *  1. (#74, à venir) push de l'outbox — pas encore implémenté ;
+ *  1. **push de l'outbox** (#74) : flush des mutations locales vers l'API, AVANT
+ *     le pull. Sur `401`/réseau, l'erreur remonte ici sans drop d'entrée (l'outbox
+ *     survit pour la passe suivante / la ré-auth) et on **n'enchaîne pas** le pull.
  *  2. pull du delta depuis le curseur persisté (`null` ⇒ `since=0`, initiale),
  *     en enchaînant les pages tant que `complete` est faux ;
  *  3. application de chaque page au réplica + avancée du curseur ;
@@ -30,9 +47,15 @@ export type PullDelta = (since: number) => Promise<SyncResponse>;
  * Idempotente et sûre à rejouer (déclencheurs multiples) : un échec réseau
  * remonte tel quel sans avancer le curseur au-delà de la dernière page écrite.
  */
-export async function runSync(db: ReplicaDb, pull: PullDelta): Promise<void> {
-  // --- (1) Point d'extension outbox (#74) ---
-  // await flushOutbox(db, push);  // poussera les mutations locales avant le pull.
+export async function runSync(
+  db: ReplicaDb,
+  pull: PullDelta,
+  push: PushOutbox = pushRequired,
+): Promise<void> {
+  // --- (1) Push de l'outbox AVANT le pull (push-avant-pull, ADR 0018) ---
+  // En cas d'échec (401/réseau), `flushOutbox` propage : on ne pull pas, et les
+  // entrées non-poussées restent en outbox pour la prochaine passe.
+  await flushOutbox(db, push);
 
   // --- (2-4) Pull paginé depuis le curseur courant ---
   let since = (await readSyncCursor(db)) ?? 0;

@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import type { SyncArticle, SyncFeed, SyncFolder } from "@boreas/api-contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { enqueueOutbox } from "./outbox-store";
 import {
   applyDelta,
   deleteReplica,
@@ -134,6 +135,89 @@ describe("replica-store — applyDelta (tombstones)", () => {
       tombstones: [{ entityType: "article", entityId: "absent" }],
     });
     expect(await db.count("articles")).toBe(0);
+  });
+});
+
+describe("replica-store — applyDelta (protection des non-ackés, #74)", () => {
+  it("ignore l'upsert descendant d'un article ayant une entrée outbox en attente", async () => {
+    // État local optimiste : a1 lu, mutation empilée mais pas encore ackée.
+    await applyDelta(db, {
+      upserts: {
+        articles: [article({ id: "a1", read: true })],
+        feeds: [],
+        folders: [],
+      },
+      tombstones: [],
+    });
+    await enqueueOutbox(db, {
+      kind: "patch",
+      articleId: "a1",
+      field: "read",
+      value: true,
+    });
+
+    // Le serveur (qui n'a pas encore reçu la mutation) renvoie a1 non-lu.
+    await applyDelta(db, {
+      upserts: {
+        articles: [article({ id: "a1", read: false })],
+        feeds: [],
+        folders: [],
+      },
+      tombstones: [],
+    });
+
+    // L'upsert descendant n'a PAS écrasé la mutation locale non-ackée (LWW).
+    expect((await db.get("articles", "a1"))?.read).toBe(true);
+  });
+
+  it("ignore le tombstone descendant d'un article en attente", async () => {
+    await applyDelta(db, {
+      upserts: { articles: [article({ id: "a1" })], feeds: [], folders: [] },
+      tombstones: [],
+    });
+    await enqueueOutbox(db, {
+      kind: "patch",
+      articleId: "a1",
+      field: "saved",
+      value: true,
+    });
+
+    await applyDelta(db, {
+      upserts: { articles: [], feeds: [], folders: [] },
+      tombstones: [{ entityType: "article", entityId: "a1" }],
+    });
+
+    // L'article en attente n'est pas évincé tant que sa mutation n'est pas ackée.
+    expect(await db.get("articles", "a1")).toBeDefined();
+  });
+
+  it("applique normalement les upserts d'articles SANS entrée en attente", async () => {
+    await applyDelta(db, {
+      upserts: {
+        articles: [article({ id: "a1", read: false })],
+        feeds: [],
+        folders: [],
+      },
+      tombstones: [],
+    });
+    // a2 a une entrée pending, a1 non.
+    await enqueueOutbox(db, {
+      kind: "patch",
+      articleId: "a2",
+      field: "read",
+      value: true,
+    });
+
+    await applyDelta(db, {
+      upserts: {
+        articles: [article({ id: "a1", read: true })],
+        feeds: [],
+        folders: [],
+      },
+      tombstones: [],
+    });
+
+    expect((await db.get("articles", "a1"))?.read).toBe(true);
   });
 });
 

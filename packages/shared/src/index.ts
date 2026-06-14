@@ -15,6 +15,7 @@ export {
   folders,
   getDb,
   settings,
+  tombstones,
 } from "./db/index";
 export type { DiscoveredFeed } from "./feed-discovery";
 export { discoverFeeds } from "./feed-discovery";
@@ -46,4 +47,6 @@ export {
   runRetention,
   sweepOrphanContent,
 } from "./retention";
-export { sqlUtcNow } from "./timestamp";
+export { nowEpochMs, sqlUtcNow } from "./timestamp";
+export type { TombstoneEntityType } from "./tombstones";
+export { writeTombstones } from "./tombstones";

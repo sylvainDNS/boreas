@@ -9,12 +9,14 @@ import { articles, feeds, settings } from "./db";
 import type { ParsedItem } from "./feed-parser";
 import { parseFeed } from "./feed-parser";
 import { sqlUtcNow } from "./timestamp";
+import { writeTombstones } from "./tombstones";
 
-// On dérive la taille de lot d'insertion du nombre de colonnes posées par ligne
-// (limites centralisées dans `batching.ts`) pour qu'elle s'ajuste automatiquement
-// si une colonne est ajoutée à `articles`, au lieu d'un nombre magique qui
-// dépasserait la limite silencieusement.
-const ARTICLE_INSERT_COLUMNS = 12;
+// On dérive la taille de lot d'insertion du nombre de **paramètres liés** posés
+// par ligne (limites centralisées dans `batching.ts`) pour qu'elle s'ajuste
+// automatiquement si une colonne est ajoutée à `articles`, au lieu d'un nombre
+// magique qui dépasserait la limite silencieusement. 11 valeurs explicites + le
+// `$defaultFn` d'`updated_at` (#69), que Drizzle lie à l'INSERT, = 12 ; +1 de marge.
+const ARTICLE_INSERT_COLUMNS = 13;
 const INSERT_CHUNK = insertChunkSize(ARTICLE_INSERT_COLUMNS);
 
 // Concurrence max de l'extraction+sanitization+put R2 par lot. Chaque item
@@ -449,6 +451,14 @@ export async function getDueFeedIds(
  * `eq(articles.feed_id, id)` ou `and(eq(feed_id, id), eq(saved, false))`). Une
  * panne R2 sur un objet ne bloque pas la suppression D1 : les orphelins R2
  * éventuels seront rattrapés par le balayage périodique (#15, ADR 0004).
+ *
+ * **Chokepoint unique des suppressions d'articles** : on inscrit ici un
+ * tombstone par article effacé (#69, ADR 0018), ce qui couvre d'un seul endroit
+ * la purge de rétention (#15), la purge des non-Saved au désabonnement (#14) et
+ * le Delete destructif d'un Feed — tous les chemins qui faisaient jusqu'ici un
+ * hard-delete silencieux. Le tombstone est posé **avant** le DELETE D1 (FK sans
+ * effet : `tombstones` est indépendante de `articles`), de sorte qu'une panne du
+ * DELETE n'orpheline pas un tombstone sans suppression effective.
  */
 export async function deleteArticlesAndContent(
   db: Db,
@@ -471,6 +481,12 @@ export async function deleteArticlesAndContent(
     }
   }
 
+  // Trace la suppression pour le delta sync avant le hard-delete D1.
+  await writeTombstones(
+    db,
+    "article",
+    rows.map((r) => r.id),
+  );
   await db.delete(articles).where(where);
   return rows.length;
 }

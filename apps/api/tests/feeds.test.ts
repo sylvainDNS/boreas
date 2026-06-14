@@ -93,8 +93,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Lit le tombstone d'une entité (deleted_at epoch-ms), ou undefined. */
+async function tombstone(
+  entityType: string,
+  entityId: string,
+): Promise<number | undefined> {
+  const row = await env.DB.prepare(
+    "SELECT deleted_at FROM tombstones WHERE entity_type = ? AND entity_id = ?",
+  )
+    .bind(entityType, entityId)
+    .first<{ deleted_at: number }>();
+  return row?.deleted_at;
+}
+
+/** Lit `updated_at` (epoch-ms) d'un Feed. */
+async function feedUpdatedAt(id: string): Promise<number | undefined> {
+  const row = await env.DB.prepare("SELECT updated_at FROM feeds WHERE id = ?")
+    .bind(id)
+    .first<{ updated_at: number }>();
+  return row?.updated_at;
+}
+
 beforeEach(async () => {
   // Isolation entre tests : tables repartie de zéro (articles avant feeds — FK).
+  await env.DB.prepare("DELETE FROM tombstones").run();
   await env.DB.prepare("DELETE FROM articles").run();
   await env.DB.prepare("DELETE FROM feeds").run();
 });
@@ -587,6 +609,16 @@ describe("Cycle de vie d'un Feed (#14) — unsubscribe & delete", () => {
       // Sorti de la sélection Cron.
       const due = await getDueFeedIds(getDb(env.DB));
       expect(due).not.toContain("f1");
+
+      // Le désabonnement n'est PAS un Delete (ADR 0018) : le Feed garde sa
+      // ligne et « descend » via son updated_at bumpé, sans tombstone Feed.
+      expect(await tombstone("feed", "f1")).toBeUndefined();
+      expect(typeof (await feedUpdatedAt("f1"))).toBe("number");
+      // Ses Articles non-Saved purgés, eux, suivent le chemin de suppression
+      // tracé : un tombstone par article purgé.
+      expect(typeof (await tombstone("article", "a-plain"))).toBe("number");
+      // Le Saved conservé n'a pas de tombstone.
+      expect(await tombstone("article", "a-saved")).toBeUndefined();
     });
 
     it("renvoie 404 sur un feed inconnu", async () => {
@@ -637,6 +669,12 @@ describe("Cycle de vie d'un Feed (#14) — unsubscribe & delete", () => {
       expect(await rowExists("articles", "d-saved")).toBe(false);
       expect(await r2Exists("articles/d-plain.html")).toBe(false);
       expect(await r2Exists("articles/d-saved.html")).toBe(false);
+
+      // Delete destructif (ADR 0018) : tombstone du Feed ET de tous ses Articles
+      // (Saved compris), pour que le delta sync (#69) propage la suppression.
+      expect(typeof (await tombstone("feed", "f2"))).toBe("number");
+      expect(typeof (await tombstone("article", "d-plain"))).toBe("number");
+      expect(typeof (await tombstone("article", "d-saved"))).toBe("number");
     });
 
     it("renvoie 404 sur un feed inconnu", async () => {
@@ -779,5 +817,76 @@ describe("Cycle de vie d'un Feed (#14) — unsubscribe & delete", () => {
       );
       expect(res.status).toBe(404);
     });
+  });
+});
+
+describe("updated_at — ingestion (#71, ADR 0018)", () => {
+  /** Lit `updated_at` (epoch-ms) du seul article du feed, ou undefined. */
+  async function anyArticleUpdatedAt(
+    feedId: string,
+  ): Promise<number | undefined> {
+    const row = await env.DB.prepare(
+      "SELECT updated_at FROM articles WHERE feed_id = ? LIMIT 1",
+    )
+      .bind(feedId)
+      .first<{ updated_at: number }>();
+    return row?.updated_at;
+  }
+
+  it("pose updated_at sur les articles ingérés à l'abonnement", async () => {
+    mockOutboundFetch(200, RSS(ITEM(1)));
+    const sub = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "https://src.example/ts.xml" }),
+      }),
+    );
+    const feedId = ((await sub.json()) as { feed: { id: string } }).feed.id;
+    const ts = await anyArticleUpdatedAt(feedId);
+    expect(typeof ts).toBe("number");
+    expect(ts).toBeGreaterThan(0);
+  });
+
+  it("un refresh sans nouveauté (304) ne bumpe PAS updated_at du Feed (anti-churn delta)", async () => {
+    // Les écritures de santé/polling (etag, last_check_at, next_check_at…) ne
+    // sont pas des mutations de domaine : elles ne doivent pas faire re-pousser
+    // le Feed à chaque poll par le delta sync (#69).
+    const url = "https://src.example/poll.xml";
+    mockOutboundFetch(200, RSS(ITEM(1)), "application/rss+xml");
+    const sub = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      }),
+    );
+    const feedId = ((await sub.json()) as { feed: { id: string } }).feed.id;
+
+    // Fige updated_at à une valeur basse, puis rejoue un poll qui ne ramène rien.
+    await env.DB.prepare("UPDATE feeds SET updated_at = 1 WHERE id = ?")
+      .bind(feedId)
+      .run();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 304 })),
+    );
+    const refresh = await SELF.fetch(
+      `${ORIGIN}/api/feeds/${feedId}/refresh`,
+      authed({ method: "POST" }),
+    );
+    expect(refresh.status).toBe(200);
+
+    // last_check_at/next_check_at ont avancé, mais updated_at reste figé.
+    const row = await env.DB.prepare(
+      "SELECT updated_at, next_check_at FROM feeds WHERE id = ?",
+    )
+      .bind(feedId)
+      .first<{ updated_at: number; next_check_at: string | null }>();
+    expect(row?.updated_at).toBe(1);
+    expect(row?.next_check_at).toBeTruthy();
   });
 });

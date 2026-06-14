@@ -24,8 +24,10 @@ import {
   folders,
   getDb,
   ingestFeed,
+  nowEpochMs,
   resubscribeFeed,
   sqlUtcNow,
+  writeTombstones,
 } from "@boreas/shared";
 import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
@@ -387,8 +389,13 @@ feedsRoutes.patch("/:id", async (c) => {
   }
 
   // `parsed.data` ne porte que les champs fournis : on mappe `folderId` (API)
-  // vers la colonne `folder_id` et on n'écrit que ce qui est présent.
-  const set: { title?: string; folder_id?: string | null } = {};
+  // vers la colonne `folder_id` et on n'écrit que ce qui est présent. Renommage
+  // et déplacement sont des mutations de domaine → bump `updated_at` (#69).
+  const set: {
+    title?: string;
+    folder_id?: string | null;
+    updated_at: number;
+  } = { updated_at: nowEpochMs() };
   if (parsed.data.title !== undefined) set.title = parsed.data.title;
   if (parsed.data.folderId !== undefined) set.folder_id = parsed.data.folderId;
 
@@ -415,9 +422,12 @@ feedsRoutes.post("/:id/unsubscribe", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
+  // Le désabonnement est une mutation de domaine (le Feed change d'état) qui
+  // bumpe `updated_at` (#69, ADR 0018) : le Feed « descend » au delta sync via
+  // ce bump et NON via un tombstone — il garde sa ligne (contexte des Saved).
   const updated = await db
     .update(feeds)
-    .set({ unsubscribed_at: sqlUtcNow() })
+    .set({ unsubscribed_at: sqlUtcNow(), updated_at: nowEpochMs() })
     .where(and(eq(feeds.id, id), isNull(feeds.unsubscribed_at)))
     .returning({ id: feeds.id });
   if (updated.length === 0) {
@@ -446,9 +456,15 @@ feedsRoutes.delete("/:id", async (c) => {
 
   // On purge d'abord les Articles + objets R2 (FK `articles.feed_id` en ON DELETE
   // no action), puis on supprime la ligne Feed en signalant son existence via
-  // `returning()` : pas de SELECT préalable ni de fenêtre TOCTOU. Si le Feed
-  // n'existe pas, la purge est un no-op et le delete renvoie une liste vide → 404.
+  // `returning()` : pas de SELECT préalable ni de fenêtre TOCTOU.
+  // `deleteArticlesAndContent` tombe déjà ses articles (chokepoint #69) ; on trace
+  // le Feed lui-même **avant** le hard-delete, comme ce chokepoint : un crash entre
+  // les deux ne peut alors pas laisser un Feed supprimé sans tombstone (il
+  // subsisterait à jamais sur le réplica local). Idempotent et sans effet
+  // observable si le Feed n'existe pas (le réplica évince une entité jamais reçue),
+  // d'où le 404 dérivé du seul `delete` (Delete destructif, ADR 0018).
   await deleteArticlesAndContent(db, c.env.BUCKET, eq(articles.feed_id, id));
+  await writeTombstones(db, "feed", [id]);
   const deleted = await db
     .delete(feeds)
     .where(eq(feeds.id, id))

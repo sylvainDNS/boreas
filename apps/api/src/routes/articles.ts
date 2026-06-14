@@ -208,9 +208,11 @@ articlesRoutes.patch("/:id", async (c) => {
   // `parsed.data` ne contient que les champs réellement fournis (zod `.optional`
   // n'injecte pas les clés absentes) et `.refine` en garantit au moins un : on
   // l'utilise directement comme jeu de colonnes à mettre à jour et comme écho.
+  // On bumpe `updated_at` (#69, ADR 0018) : Read/Saved sont des mutations de
+  // domaine que le delta sync doit propager au réplica local.
   const updated = await db
     .update(articles)
-    .set(parsed.data)
+    .set({ ...parsed.data, updated_at: nowEpochMs() })
     .where(eq(articles.id, id))
     .returning({ id: articles.id });
 
@@ -248,9 +250,11 @@ articlesRoutes.post("/mark-read", async (c) => {
           )
         : undefined;
 
+  // Bump `updated_at` (#69, ADR 0018) des seuls articles réellement basculés
+  // (`read = false` ci-dessous) : mark-all-read est une mutation de domaine.
   const updated = await db
     .update(articles)
-    .set({ read: true })
+    .set({ read: true, updated_at: nowEpochMs() })
     .where(and(eq(articles.read, false), scopeFilter))
     .returning({ id: articles.id });
 
@@ -303,8 +307,14 @@ articlesRoutes.get("/:id", async (c) => {
   }
 
   // Marque Read à l'ouverture (#7) ; on évite une écriture inutile si déjà lu.
+  // Cette bascule Read est une mutation de domaine : elle bumpe `updated_at`
+  // (#69, ADR 0018). Quand l'article est déjà lu, on n'écrit rien — donc pas de
+  // bump, cohérent avec « aucune mutation ».
   if (!row.read) {
-    await db.update(articles).set({ read: true }).where(eq(articles.id, id));
+    await db
+      .update(articles)
+      .set({ read: true, updated_at: nowEpochMs() })
+      .where(eq(articles.id, id));
   }
 
   return c.json({

@@ -62,8 +62,22 @@ async function folderIdOfFeed(feedId: string): Promise<string | null> {
   return row?.f ?? null;
 }
 
+/** Lit le tombstone d'une entité (deleted_at epoch-ms), ou undefined. */
+async function tombstone(
+  entityType: string,
+  entityId: string,
+): Promise<number | undefined> {
+  const row = await env.DB.prepare(
+    "SELECT deleted_at FROM tombstones WHERE entity_type = ? AND entity_id = ?",
+  )
+    .bind(entityType, entityId)
+    .first<{ deleted_at: number }>();
+  return row?.deleted_at;
+}
+
 beforeEach(async () => {
   // Isolation : articles → feeds → folders (ordre dicté par les FK).
+  await env.DB.prepare("DELETE FROM tombstones").run();
   await env.DB.prepare("DELETE FROM articles").run();
   await env.DB.prepare("DELETE FROM feeds").run();
   await env.DB.prepare("DELETE FROM folders").run();
@@ -134,6 +148,11 @@ describe("CRUD /api/folders (#13)", () => {
     ).first<{ n: number }>();
     expect(folders?.n).toBe(0);
     expect(await folderIdOfFeed("feed-1")).toBeNull();
+
+    // Delete destructif (ADR 0018) : tombstone du Folder pour le delta sync (#69).
+    // Le Feed désassigné, lui, n'est pas tombstoné (il « descend » via updated_at).
+    expect(typeof (await tombstone("folder", "fold-1"))).toBe("number");
+    expect(await tombstone("feed", "feed-1")).toBeUndefined();
 
     const missing = await SELF.fetch(
       `${ORIGIN}/api/folders/fold-1`,
@@ -261,5 +280,105 @@ describe("Vue & compteurs par Folder (#13)", () => {
       "SELECT COUNT(*) AS n FROM articles WHERE read = 0",
     ).first<{ n: number }>();
     expect(unread?.n).toBe(1);
+  });
+});
+
+describe("updated_at — bump des mutations Feed/Folder (#71, ADR 0018)", () => {
+  /** Lit `updated_at` (epoch-ms) d'une ligne d'une table donnée. */
+  async function updatedAtOf(
+    table: "feeds" | "folders",
+    id: string,
+  ): Promise<number | undefined> {
+    const row = await env.DB.prepare(
+      `SELECT updated_at FROM ${table} WHERE id = ?`,
+    )
+      .bind(id)
+      .first<{ updated_at: number }>();
+    return row?.updated_at;
+  }
+
+  /** Force `updated_at` à une valeur basse pour observer un bump ultérieur. */
+  async function setUpdatedAt(
+    table: "feeds" | "folders",
+    id: string,
+    value: number,
+  ): Promise<void> {
+    await env.DB.prepare(`UPDATE ${table} SET updated_at = ? WHERE id = ?`)
+      .bind(value, id)
+      .run();
+  }
+
+  it("création d'un Folder pose updated_at", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/folders`,
+      authed({ method: "POST", body: JSON.stringify({ name: "Tech" }) }),
+    );
+    const { folder } = (await res.json()) as { folder: { id: string } };
+    expect(typeof (await updatedAtOf("folders", folder.id))).toBe("number");
+  });
+
+  it("renommage d'un Folder bumpe updated_at", async () => {
+    await seedFolder("fold-1", "Ancien");
+    await setUpdatedAt("folders", "fold-1", 1);
+
+    await SELF.fetch(
+      `${ORIGIN}/api/folders/fold-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ name: "Nouveau" }) }),
+    );
+
+    expect(await updatedAtOf("folders", "fold-1")).toBeGreaterThan(1);
+  });
+
+  it("renommage et déplacement d'un Feed bumpent updated_at", async () => {
+    await seedFolder("fold-1", "Tech");
+    await seedFeed("feed-1", { title: "Avant" });
+    await setUpdatedAt("feeds", "feed-1", 1);
+
+    await SELF.fetch(
+      `${ORIGIN}/api/feeds/feed-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ title: "Après" }) }),
+    );
+    expect(await updatedAtOf("feeds", "feed-1")).toBeGreaterThan(1);
+
+    await setUpdatedAt("feeds", "feed-1", 1);
+    await SELF.fetch(
+      `${ORIGIN}/api/feeds/feed-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ folderId: "fold-1" }) }),
+    );
+    expect(await updatedAtOf("feeds", "feed-1")).toBeGreaterThan(1);
+  });
+
+  it("suppression d'un Folder désassigne ses Feeds en bumpant leur updated_at", async () => {
+    await seedFolder("fold-1", "Tech");
+    await seedFeed("feed-1", { folderId: "fold-1" });
+    await setUpdatedAt("feeds", "feed-1", 1);
+
+    await SELF.fetch(
+      `${ORIGIN}/api/folders/fold-1`,
+      authed({ method: "DELETE" }),
+    );
+
+    // Le Feed désassigné « descend » via son updated_at bumpé (pas de tombstone).
+    expect(await updatedAtOf("feeds", "feed-1")).toBeGreaterThan(1);
+  });
+});
+
+describe("Contrat wire inchangé — updated_at non exposé (#71, AC#4)", () => {
+  it("GET /api/feeds n'expose pas updated_at", async () => {
+    await seedFeed("feed-1");
+    const body = (await (
+      await SELF.fetch(`${ORIGIN}/api/feeds`, authed())
+    ).json()) as { feeds: Record<string, unknown>[] };
+    expect(body.feeds[0]).not.toHaveProperty("updated_at");
+    expect(body.feeds[0]).not.toHaveProperty("updatedAt");
+  });
+
+  it("GET /api/folders n'expose pas updated_at", async () => {
+    await seedFolder("fold-1", "Tech");
+    const body = (await (
+      await SELF.fetch(`${ORIGIN}/api/folders`, authed())
+    ).json()) as { folders: Record<string, unknown>[] };
+    expect(body.folders[0]).not.toHaveProperty("updated_at");
+    expect(body.folders[0]).not.toHaveProperty("updatedAt");
   });
 });

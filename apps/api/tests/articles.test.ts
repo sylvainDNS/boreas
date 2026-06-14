@@ -69,7 +69,25 @@ async function savedState(id: string): Promise<number | undefined> {
   return row?.saved;
 }
 
+/** Lit `updated_at` (epoch-ms) d'un Article. */
+async function updatedAt(id: string): Promise<number | undefined> {
+  const row = await env.DB.prepare(
+    "SELECT updated_at FROM articles WHERE id = ?",
+  )
+    .bind(id)
+    .first<{ updated_at: number }>();
+  return row?.updated_at;
+}
+
+/** Force `updated_at` d'un Article à une valeur basse, pour observer un bump. */
+async function setUpdatedAt(id: string, value: number): Promise<void> {
+  await env.DB.prepare("UPDATE articles SET updated_at = ? WHERE id = ?")
+    .bind(value, id)
+    .run();
+}
+
 beforeEach(async () => {
+  await env.DB.prepare("DELETE FROM tombstones").run();
   await env.DB.prepare("DELETE FROM articles").run();
   await env.DB.prepare("DELETE FROM feeds").run();
 });
@@ -533,5 +551,76 @@ describe("Feeds désabonnés (#14) — exclusion des vues non-lus", () => {
     ).json()) as { total: number; byFeed: { feedId: string }[] };
     expect(counts.total).toBe(1);
     expect(counts.byFeed.map((b) => b.feedId)).not.toContain("feed-off");
+  });
+});
+
+describe("updated_at — bump des mutations de domaine (#71, ADR 0018)", () => {
+  it("PATCH read/saved bumpe updated_at", async () => {
+    await seedArticle({ id: "art-1", read: false });
+    await setUpdatedAt("art-1", 1);
+
+    await SELF.fetch(
+      `${ORIGIN}/api/articles/art-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ read: true }) }),
+    );
+
+    const after = await updatedAt("art-1");
+    expect(typeof after).toBe("number");
+    expect(after).toBeGreaterThan(1);
+  });
+
+  it("l'ouverture (GET /:id) qui marque Read bumpe updated_at", async () => {
+    await seedArticle({ id: "art-1", read: false });
+    await setUpdatedAt("art-1", 1);
+
+    await SELF.fetch(`${ORIGIN}/api/articles/art-1`, authed());
+
+    expect(await updatedAt("art-1")).toBeGreaterThan(1);
+  });
+
+  it("rouvrir un article déjà lu ne réécrit pas updated_at (pas de Read)", async () => {
+    await seedArticle({ id: "art-1", read: true });
+    await setUpdatedAt("art-1", 42);
+
+    await SELF.fetch(`${ORIGIN}/api/articles/art-1`, authed());
+
+    // Aucune écriture Read → updated_at inchangé (cohérent : pas de mutation).
+    expect(await updatedAt("art-1")).toBe(42);
+  });
+
+  it("mark-read bumpe updated_at des seuls articles basculés", async () => {
+    await seedArticle({ id: "art-u", read: false });
+    await seedArticle({ id: "art-r", read: true });
+    await setUpdatedAt("art-u", 1);
+    await setUpdatedAt("art-r", 1);
+
+    await SELF.fetch(
+      `${ORIGIN}/api/articles/mark-read`,
+      authed({ method: "POST", body: JSON.stringify({ scope: "global" }) }),
+    );
+
+    // Le non-lu basculé est bumpé ; le déjà-lu (non touché) ne l'est pas.
+    expect(await updatedAt("art-u")).toBeGreaterThan(1);
+    expect(await updatedAt("art-r")).toBe(1);
+  });
+});
+
+describe("Contrat wire inchangé — updated_at non exposé (#71, AC#4)", () => {
+  it("GET /api/articles n'expose pas updated_at", async () => {
+    await seedArticle({ id: "art-1", read: false });
+    const body = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles?filter=all`, authed())
+    ).json()) as { articles: Record<string, unknown>[] };
+    expect(body.articles[0]).not.toHaveProperty("updated_at");
+    expect(body.articles[0]).not.toHaveProperty("updatedAt");
+  });
+
+  it("GET /api/articles/:id n'expose pas updated_at", async () => {
+    await seedArticle({ id: "art-1", read: false });
+    const body = (await (
+      await SELF.fetch(`${ORIGIN}/api/articles/art-1`, authed())
+    ).json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("updated_at");
+    expect(body).not.toHaveProperty("updatedAt");
   });
 });

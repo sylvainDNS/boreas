@@ -8,7 +8,7 @@ import {
   type MarkReadResponse,
   markReadRequestSchema,
 } from "@boreas/api-contracts";
-import { articles, feeds, getDb } from "@boreas/shared";
+import { articles, feeds, getDb, nowEpochMs } from "@boreas/shared";
 import {
   and,
   count,

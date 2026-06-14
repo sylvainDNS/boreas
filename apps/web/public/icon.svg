@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Boréas">
+  <!-- Icône maskable : fond plein bord à bord (le glyphe reste dans la zone de
+       sécurité centrale ~80% pour survivre au masquage Android/Chrome). Couleur
+       de marque = accent violet (oklch(0.58 0.19 300), cf. styles/app.css). -->
+  <rect width="512" height="512" fill="#7c3aed"/>
+  <text x="256" y="256" fill="#ffffff" font-family="Figtree, system-ui, sans-serif"
+        font-size="300" font-weight="700" text-anchor="middle"
+        dominant-baseline="central">B</text>
+</svg>

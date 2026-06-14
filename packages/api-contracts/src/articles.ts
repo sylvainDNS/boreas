@@ -46,6 +46,9 @@ export type ArticleListResponse = z.infer<typeof articleListResponseSchema>;
 /** `GET /api/articles/:id` — contenu plein du lecteur (#7). */
 export const articleDetailResponseSchema = z.object({
   id: z.string(),
+  /** Feed source (jointure stable) : permet au lecteur de lier le titre du Feed
+   *  vers sa liste d'articles même en deep-link/refresh (item hors liste en cache). */
+  feedId: z.string(),
   feedName: z.string(),
   title: z.string().nullable(),
   link: z.string().nullable(),

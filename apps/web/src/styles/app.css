@@ -100,6 +100,8 @@
   font-family: var(--font-read);
   font-size: 1rem;
   line-height: 1.65;
+  /* Casse les chaînes insécables (URLs, tokens) plutôt que d'élargir la colonne. */
+  overflow-wrap: break-word;
 }
 [data-theme="dark"] .reader-prose {
   --code-bg: #161b22;
@@ -199,8 +201,11 @@
   margin: 0;
 }
 
-/* Tables */
+/* Tables : scroll horizontal interne plutôt que de repousser la colonne lecteur. */
 .reader-prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   width: 100%;
   font-size: 0.92rem;
@@ -230,6 +235,13 @@
   color: var(--color-muted);
   font-style: italic;
   margin-top: 0.55rem;
+}
+
+/* <pre> brut (chemin de repli dangerouslySetInnerHTML, sans .code-card) :
+   scroll horizontal interne pour ne pas élargir la colonne lecteur. */
+.reader-prose pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Code inline (hors carte de code) */

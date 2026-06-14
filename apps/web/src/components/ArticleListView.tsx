@@ -87,7 +87,7 @@ export function ArticleListView({ view }: ArticleListViewProps) {
     <div className="flex h-full min-h-0">
       {/* Panneau liste */}
       <section
-        className={`min-h-0 flex-col border-border lg:flex lg:w-[24rem] lg:border-r ${
+        className={`min-h-0 min-w-0 flex-col border-border lg:flex lg:w-[24rem] lg:border-r ${
           hasSelection ? "hidden lg:flex" : "flex w-full"
         }`}
       >
@@ -167,9 +167,11 @@ export function ArticleListView({ view }: ArticleListViewProps) {
         </div>
       </section>
 
-      {/* Panneau lecteur */}
+      {/* Panneau lecteur. `min-w-0` indispensable : sans lui, cet item flex
+          garde `min-width:auto` et gonfle à la largeur intrinsèque d'une image
+          large → débordement horizontal de la page (surtout mobile). */}
       <section
-        className={`min-h-0 flex-1 flex-col ${
+        className={`min-h-0 min-w-0 flex-1 flex-col ${
           hasSelection ? "flex" : "hidden lg:flex"
         }`}
       >

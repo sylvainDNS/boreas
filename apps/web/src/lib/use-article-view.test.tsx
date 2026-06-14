@@ -334,6 +334,7 @@ describe("<ArticleListView view />", () => {
     stubApi(mockedFetch, {
       "GET /articles/:id": ({ params }: ApiHandlerContext) => ({
         id: params.id as string,
+        feedId: "f1",
         feedName: "Flux 1",
         title: "Titre a1",
         link: null,
@@ -358,6 +359,7 @@ describe("<ArticleListView view />", () => {
     stubApi(mockedFetch, {
       "GET /articles/:id": ({ params }: ApiHandlerContext) => ({
         id: params.id as string,
+        feedId: "f-distant",
         feedName: "Flux distant",
         title: "Article distant",
         link: null,
@@ -382,6 +384,7 @@ describe("<ArticleListView view />", () => {
     stubApi(mockedFetch, {
       "GET /articles/:id": ({ params }: ApiHandlerContext) => ({
         id: params.id as string,
+        feedId: "f-distant",
         feedName: "Flux distant",
         title: "Article distant",
         link: null,

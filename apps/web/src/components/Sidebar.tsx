@@ -21,7 +21,6 @@ import {
   type SidebarDialog,
 } from "./sidebar/sidebar-model";
 import { useFeedLifecycle } from "./sidebar/use-feed-lifecycle";
-import { ThemeToggle } from "./ThemeToggle";
 import { CountBadge } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
 
@@ -172,7 +171,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       />
 
       <div className="space-y-2 border-border border-t p-3">
-        <ThemeToggle />
         <Link
           to="/settings"
           onClick={onNavigate}

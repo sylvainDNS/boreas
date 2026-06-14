@@ -1,16 +1,19 @@
+import "fake-indexeddb/auto";
 import type {
   ArticleCountsResponse,
   ArticleListResponse,
 } from "@boreas/api-contracts";
 import { renderHook, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArticleListView } from "../components/ArticleListView";
 import type { ApiHandlerContext } from "../test/api-mock";
 import { stubApi } from "../test/api-mock";
 import { createAppWrapper, renderWithApp } from "../test/render";
 import { apiFetch } from "./api";
 import { toArticle } from "./articles";
+import { resetReplicaSingleton } from "./sync/replica";
+import { applyDelta, deleteReplica, openReplica } from "./sync/replica-store";
 import type { ArticleView } from "./use-article-view";
 import { useArticleView } from "./use-article-view";
 
@@ -22,9 +25,28 @@ vi.mock("./api", async (importActual) => {
 
 const mockedFetch = vi.mocked(apiFetch);
 
+beforeEach(async () => {
+  // Réplica vierge entre tests : la vue non-lus lit le store local (#72).
+  await deleteReplica();
+  resetReplicaSingleton();
+});
+
 afterEach(() => {
   mockedFetch.mockReset();
+  resetReplicaSingleton();
 });
+
+/** Pré-remplit le réplica local avec des articles non-lus. */
+async function seedReplica(
+  articles: ArticleListResponse["articles"],
+): Promise<void> {
+  const db = await openReplica();
+  await applyDelta(db, {
+    upserts: { articles, feeds: [], folders: [] },
+    tombstones: [],
+  });
+  db.close();
+}
 
 /** Item de liste wire minimal, surchargeable. */
 function item(
@@ -61,7 +83,10 @@ const emptyCounts: ArticleCountsResponse = {
 };
 
 describe("useArticleView", () => {
-  it("scope all : titre, filtre, compteur, toggle showRead → filter=unread", async () => {
+  it("scope all : filter=all via API ; toggle showRead → non-lus lus depuis le réplica local (#72)", async () => {
+    // Le réplica contient un non-lu (la vue non-lus est désormais local-first).
+    await seedReplica([item("local-1", { read: false })]);
+
     const urls: string[] = [];
     stubApi(mockedFetch, {
       "GET /articles": ({ url }: ApiHandlerContext) => {
@@ -78,20 +103,21 @@ describe("useArticleView", () => {
       wrapper: createAppWrapper(),
     });
 
+    // showRead actif par défaut → filtre `all` servi par l'API.
     await waitFor(() => expect(result.current.articles).toHaveLength(1));
     expect(result.current.title).toBe("Tous les non-lus");
     expect(result.current.unreadCount).toBe(7);
-    // showRead actif par défaut → filter=all
     expect(result.current.showRead).toBe(true);
     expect(urls.some((u) => u.includes("filter=all"))).toBe(true);
 
-    // Bascule : masque les lus → nouvelle requête filter=unread
+    // Bascule : masque les lus → filtre `unread` lu depuis le réplica LOCAL.
     act(() => result.current.onToggleShowRead?.());
     await waitFor(() =>
-      expect(urls.some((u) => u.includes("filter=unread"))).toBe(true),
+      expect(result.current.articles.map((a) => a.id)).toEqual(["local-1"]),
     );
     expect(result.current.showRead).toBe(false);
-    expect(result.current.emptyLabel).toBe("Tout est lu 🎉");
+    // Aucun appel API `filter=unread` : la river non-lus ne touche plus le réseau.
+    expect(urls.some((u) => u.includes("filter=unread"))).toBe(false);
   });
 
   it("scope all : onRefresh poste /refresh ; onMarkAllRead poste scope global", async () => {

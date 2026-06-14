@@ -15,6 +15,8 @@ import {
   queryOptions,
 } from "@tanstack/react-query";
 import { apiFetch } from "./api";
+import { getReplica } from "./sync/replica";
+import { readUnreadPage } from "./sync/unread-repository";
 import { formatRelativeTime } from "./time";
 
 /**
@@ -75,6 +77,23 @@ export type { ArticleFilter };
 /** Préfixe de clé commun à toutes les listes paginées (tous filtres confondus). */
 export const ARTICLES_LIST_KEY = ["articles", "list"] as const;
 
+/**
+ * Clé de cache d'une liste paginée, **source de vérité unique** de sa forme
+ * (`[...préfixe, filter, feedId, folderId]`). Utilisée par la query ET par
+ * l'invalidation post-sync (`useReplicaSync`) : dériver les deux d'ici évite
+ * qu'une invalidation cible une clé fantôme si la forme évolue (#73).
+ */
+export function articlesListQueryKey(
+  filter: ArticleFilter,
+  feedId?: string,
+  folderId?: string,
+) {
+  return [...ARTICLES_LIST_KEY, filter, feedId ?? null, folderId ?? null];
+}
+
+/** Clé de la river « Tous les non-lus » locale (#72), lue depuis le réplica. */
+export const UNREAD_LOCAL_QUERY_KEY = articlesListQueryKey("unread");
+
 /** Clé du cache des compteurs de non-lus exacts. */
 export const ARTICLES_COUNTS_KEY = ["articles", "counts"] as const;
 
@@ -87,21 +106,47 @@ export const ARTICLES_COUNTS_KEY = ["articles", "counts"] as const;
 export const POLL_INTERVAL_MS = 60_000;
 
 /**
+ * Vrai pour la **seule** vue qui lit le réplica local en #72 : « Tous les
+ * non-lus » = filtre `unread`, sans Feed ni Folder (ADR 0018). Les autres vues
+ * (all, feed, folder, saved) restent sur l'API jusqu'à leur bascule en #73.
+ */
+function isLocalUnreadView(
+  filter: ArticleFilter,
+  feedId?: string,
+  folderId?: string,
+): boolean {
+  return filter === "unread" && !feedId && !folderId;
+}
+
+/**
  * Query infinie de la liste : pagination keyset par `cursor`, du plus récent au
  * plus ancien. La clé inclut le `filter`, le `feedId` (vue par Feed, #11) et le
  * `folderId` (vue agrégée par Folder, #13) pour que chaque vue conserve un cache
  * distinct. `feedId` et `folderId` sont mutuellement exclusifs en pratique. Le
  * scroll infini déclenche `fetchNextPage`.
+ *
+ * **Frontière local-first (#72, ADR 0018)** : pour la vue « Tous les non-lus »
+ * (filtre `unread`, sans Feed/Folder), le `queryFn` lit le **réplica local**
+ * (repository) au lieu de l'API — l'UI ne fait alors aucun appel réseau direct.
+ * Le moteur de sync est seul à parler au backend (déclencheurs focus/online/
+ * intervalle), si bien que cette vue n'a plus besoin du poll 60 s : on coupe
+ * `refetchInterval` pour ce cas. Les autres vues conservent API + poll.
  */
 export function listArticlesInfiniteQueryOptions(
   filter: ArticleFilter,
   feedId?: string,
   folderId?: string,
 ) {
+  const local = isLocalUnreadView(filter, feedId, folderId);
   return infiniteQueryOptions({
-    queryKey: [...ARTICLES_LIST_KEY, filter, feedId ?? null, folderId ?? null],
+    queryKey: articlesListQueryKey(filter, feedId, folderId),
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => {
+    queryFn: async ({ pageParam }) => {
+      if (local) {
+        // Lecture du réplica : forme `ArticleListResponse` identique à l'API,
+        // pour que `useInfiniteQuery`/`toArticle` restent inchangés.
+        return readUnreadPage(await getReplica(), pageParam);
+      }
       const params = new URLSearchParams({ filter });
       if (feedId) params.set("feedId", feedId);
       if (folderId) params.set("folderId", folderId);
@@ -109,7 +154,9 @@ export function listArticlesInfiniteQueryOptions(
       return apiFetch<ArticleListResponse>(`/articles?${params.toString()}`);
     },
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    refetchInterval: POLL_INTERVAL_MS,
+    // La vue locale est rafraîchie par le moteur de sync (focus/online/
+    // intervalle), pas par le poll de liste : on désactive `refetchInterval`.
+    refetchInterval: local ? false : POLL_INTERVAL_MS,
   });
 }
 

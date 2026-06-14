@@ -10,6 +10,7 @@ import { imgRoutes } from "./routes/img";
 import { opmlRoutes } from "./routes/opml";
 import { refreshRoutes } from "./routes/refresh";
 import { settingsRoutes } from "./routes/settings";
+import { syncRoutes } from "./routes/sync";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -39,6 +40,7 @@ app.route("/api/refresh", refreshRoutes);
 app.route("/api/opml", opmlRoutes);
 app.route("/api/img", imgRoutes);
 app.route("/api/settings", settingsRoutes);
+app.route("/api/sync", syncRoutes);
 
 /**
  * GET /api/health

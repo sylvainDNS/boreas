@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Boréas</title>
+    <!-- PWA (#76) : le <link rel="manifest"> et la balise theme-color sont
+         injectés au build par vite-plugin-pwa. Icônes Apple/favicon ajoutées ici
+         (non gérées par le manifest webmanifest côté iOS/onglet). -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Boréas" />
     <!-- Applique le thème avant le premier paint pour éviter un flash de thème
          (FOUC). La clé "boreas.theme" doit rester synchro avec src/lib/theme.ts. -->
     <script>

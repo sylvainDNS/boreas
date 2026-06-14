@@ -6,3 +6,4 @@ export * from "./folders";
 export * from "./opml";
 export * from "./refresh";
 export * from "./settings";
+export * from "./sync";

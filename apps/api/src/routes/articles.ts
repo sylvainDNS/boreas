@@ -5,6 +5,8 @@ import {
   type ArticlePatchResponse,
   articleFilterSchema,
   articlePatchSchema,
+  decodeArticleCursor,
+  encodeArticleCursor,
   type MarkReadResponse,
   markReadRequestSchema,
 } from "@boreas/api-contracts";
@@ -56,7 +58,7 @@ articlesRoutes.get("/", async (c) => {
   // étant NOT NULL, l'expression est toujours non-null (ADR 0015).
   const sortKey = sql<string>`coalesce(${articles.published_at}, ${articles.fetched_at})`;
 
-  const cursor = decodeCursor(c.req.query("cursor"));
+  const cursor = decodeArticleCursor(c.req.query("cursor"));
   const keyset = cursor
     ? or(
         lt(sortKey, cursor.sortKey),
@@ -116,7 +118,7 @@ articlesRoutes.get("/", async (c) => {
   const last = page.at(-1);
   const nextCursor =
     hasMore && last
-      ? encodeCursor(last.publishedAt ?? last.fetchedAt, last.id)
+      ? encodeArticleCursor(last.publishedAt ?? last.fetchedAt, last.id)
       : null;
 
   return c.json({
@@ -331,37 +333,3 @@ articlesRoutes.get("/:id", async (c) => {
     unread: !row.read,
   } satisfies ArticleDetailResponse);
 });
-
-interface Cursor {
-  /** Clé de tri du dernier article servi : `coalesce(published_at, fetched_at)`. */
-  sortKey: string;
-  id: string;
-}
-
-function encodeCursor(sortKey: string, id: string): string {
-  return toBase64Url(`${sortKey}|${id}`);
-}
-
-function decodeCursor(raw: string | undefined): Cursor | null {
-  if (!raw) return null;
-  try {
-    const decoded = fromBase64Url(raw);
-    const sep = decoded.indexOf("|");
-    if (sep === -1) return null;
-    return { sortKey: decoded.slice(0, sep), id: decoded.slice(sep + 1) };
-  } catch {
-    return null;
-  }
-}
-
-function toBase64Url(value: string): string {
-  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function fromBase64Url(value: string): string {
-  const padded = value
-    .replace(/-/g, "+")
-    .replace(/_/g, "/")
-    .padEnd(Math.ceil(value.length / 4) * 4, "=");
-  return atob(padded);
-}

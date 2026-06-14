@@ -20,15 +20,16 @@ import type { Env } from "../env";
 // Tailles de lot des écritures groupées, dérivées des limites D1 centralisées
 // (`@boreas/shared`), en tenant compte du nombre de **paramètres liés** par ligne
 // — pas du nombre de colonnes qu'on renseigne explicitement.
-// INSERT feeds : 5 paramètres par ligne. On fournit 4 valeurs (id, url, title,
-// folder_id), mais Drizzle ajoute un 5ᵉ paramètre lié pour `consecutive_failures`,
-// dont le `.default(0)` est un défaut JS injecté à l'INSERT. (`created_at`, lui,
-// a un défaut `sql\`…\`` rendu inline, donc sans paramètre.) Sous-estimer ce
-// compte fait dépasser la limite SQLite de 100 variables → « too many SQL
-// variables » sur un import de ≥ 20 flux (floor(99/4)=24 lignes × 5 = 120).
-const FEED_INSERT_CHUNK = insertChunkSize(5);
-// INSERT folders : 2 colonnes par ligne (id, name).
-const FOLDER_INSERT_CHUNK = insertChunkSize(2);
+// INSERT feeds : 6 paramètres par ligne. On fournit 4 valeurs (id, url, title,
+// folder_id), et Drizzle ajoute deux paramètres liés pour les défauts JS injectés
+// à l'INSERT : `consecutive_failures` (.default(0)) et `updated_at` ($defaultFn,
+// #69). (`created_at`, lui, a un défaut `sql\`…\`` rendu inline, donc sans
+// paramètre.) Sous-estimer ce compte fait dépasser la limite SQLite de 100
+// variables → « too many SQL variables » sur un import volumineux.
+const FEED_INSERT_CHUNK = insertChunkSize(6);
+// INSERT folders : 3 paramètres par ligne (id, name + le `$defaultFn`
+// d'`updated_at` lié à l'INSERT, #69).
+const FOLDER_INSERT_CHUNK = insertChunkSize(3);
 
 /**
  * Routes OPML (montées sur /api/opml), sous le middleware de session. Permettent

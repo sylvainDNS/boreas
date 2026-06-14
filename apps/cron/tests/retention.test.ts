@@ -65,7 +65,18 @@ async function objectExists(key: string): Promise<boolean> {
   return (await env.BUCKET.head(key)) !== null;
 }
 
+/** Lit le tombstone d'un Article purgé (deleted_at epoch-ms), ou undefined. */
+async function articleTombstone(id: string): Promise<number | undefined> {
+  const row = await env.DB.prepare(
+    "SELECT deleted_at FROM tombstones WHERE entity_type = 'article' AND entity_id = ?",
+  )
+    .bind(id)
+    .first<{ deleted_at: number }>();
+  return row?.deleted_at;
+}
+
 beforeEach(async () => {
+  await env.DB.prepare("DELETE FROM tombstones").run();
   await env.DB.prepare("DELETE FROM articles").run();
   await env.DB.prepare("DELETE FROM feeds").run();
   // Réinitialise la fenêtre au défaut seedé (60 j).
@@ -129,6 +140,30 @@ describe("purgeExpiredArticles", () => {
     await env.DB.prepare("UPDATE settings SET purge_window_days = 0").run();
     expect(await purgeExpiredArticles(db, env.BUCKET, NOW)).toBe(1);
     expect(await articleExists("a1")).toBe(false);
+  });
+
+  it("inscrit un tombstone par Article purgé (delta sync #69, ADR 0018)", async () => {
+    // La purge passe d'un hard-delete silencieux à une suppression tracée : un
+    // client offline doit pouvoir évincer la métadonnée via ce tombstone.
+    await seedArticle({ id: "a1", read: true, saved: false });
+
+    const purged = await purgeExpiredArticles(db, env.BUCKET, NOW);
+
+    expect(purged).toBe(1);
+    expect(await articleExists("a1")).toBe(false);
+    // Tombstone posé avec un horodatage epoch-ms (entier).
+    const deletedAt = await articleTombstone("a1");
+    expect(typeof deletedAt).toBe("number");
+    expect(deletedAt).toBeGreaterThan(0);
+  });
+
+  it("n'inscrit aucun tombstone quand rien n'est purgé", async () => {
+    // Un non-lu n'est pas purgé → pas de tombstone parasite (sinon le client
+    // évincerait à tort un article toujours vivant).
+    await seedArticle({ id: "a1", read: false, saved: false });
+
+    expect(await purgeExpiredArticles(db, env.BUCKET, NOW)).toBe(0);
+    expect(await articleTombstone("a1")).toBeUndefined();
   });
 });
 

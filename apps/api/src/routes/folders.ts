@@ -5,7 +5,13 @@ import {
   folderNameSchema,
   type OkResponse,
 } from "@boreas/api-contracts";
-import { feeds, folders, getDb } from "@boreas/shared";
+import {
+  feeds,
+  folders,
+  getDb,
+  nowEpochMs,
+  writeTombstones,
+} from "@boreas/shared";
 import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -58,9 +64,10 @@ foldersRoutes.patch("/:id", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
+  // Le renommage est une mutation de domaine → bump `updated_at` (#69, ADR 0018).
   const updated = await db
     .update(folders)
-    .set({ name: parsed.data.name })
+    .set({ name: parsed.data.name, updated_at: nowEpochMs() })
     .where(eq(folders.id, id))
     .returning({ id: folders.id });
 
@@ -80,11 +87,19 @@ foldersRoutes.delete("/:id", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
+  // Désassignation des Feeds rattachés : c'est une mutation de domaine de chaque
+  // Feed (son `folder_id` change) → bump `updated_at` (#69, ADR 0018). Les Feeds
+  // ne reçoivent PAS de tombstone (ils subsistent, « non classés »).
   await db
     .update(feeds)
-    .set({ folder_id: null })
+    .set({ folder_id: null, updated_at: nowEpochMs() })
     .where(eq(feeds.folder_id, id));
 
+  // Delete destructif du Folder (ADR 0018) : on trace le tombstone **avant** le
+  // hard-delete (comme le chokepoint articles) pour qu'un crash entre les deux ne
+  // laisse pas un Folder supprimé sans tombstone — il subsisterait sur le réplica.
+  // Idempotent et sans effet si le Folder n'existe pas, d'où le 404 dérivé du delete.
+  await writeTombstones(db, "folder", [id]);
   const deleted = await db
     .delete(folders)
     .where(eq(folders.id, id))

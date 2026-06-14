@@ -2,6 +2,7 @@ import { inArray } from "drizzle-orm";
 import { chunk, whereInChunkSize } from "./batching";
 import type { Db } from "./db";
 import { feeds } from "./db";
+import { nowEpochMs } from "./timestamp";
 
 /**
  * Resubscribe (#14, #42, ADR 0010) : inverse d'Unsubscribe. Réabonner un Feed
@@ -31,12 +32,12 @@ const RESUBSCRIBE_RESET = {
 } as const;
 
 // Taille de lot d'un `UPDATE … WHERE id IN (…)` : on réserve une variable liée
-// par colonne du reset, plus 1 pour le `folder_id` éventuel et 1 de marge ; le
-// reste de la limite D1 sert aux ids. Dérivée du nombre **réel** de colonnes
-// posées, elle s'ajuste si l'invariant grossit, au lieu d'un nombre magique qui
-// dépasserait la limite silencieusement.
+// par colonne du reset, plus `updated_at` (#69), plus 1 pour le `folder_id`
+// éventuel et 1 de marge ; le reste de la limite D1 sert aux ids. Dérivée du
+// nombre **réel** de colonnes posées, elle s'ajuste si l'invariant grossit, au
+// lieu d'un nombre magique qui dépasserait la limite silencieusement.
 const RESET_COLUMNS = Object.keys(RESUBSCRIBE_RESET).length;
-const RESUBSCRIBE_UPDATE_CHUNK = whereInChunkSize(RESET_COLUMNS + 2);
+const RESUBSCRIBE_UPDATE_CHUNK = whereInChunkSize(RESET_COLUMNS + 3);
 
 /** Options de réabonnement. */
 export interface ResubscribeOptions {
@@ -59,10 +60,15 @@ export async function resubscribeFeeds(
   opts: ResubscribeOptions = {},
 ): Promise<void> {
   if (feedIds.length === 0) return;
-  const set =
-    opts.folderId !== undefined
-      ? { ...RESUBSCRIBE_RESET, folder_id: opts.folderId }
-      : RESUBSCRIBE_RESET;
+  // Le réabonnement est une mutation de domaine (le Feed redevient actif) :
+  // bump `updated_at` (#69, ADR 0018) pour que le delta sync le re-pousse, comme
+  // le désabonnement. Calculé ici (pas dans la const statique, qui figerait
+  // l'horodatage à l'import) ; tout le lot partage la même valeur.
+  const set: typeof RESUBSCRIBE_RESET & {
+    updated_at: number;
+    folder_id?: string | null;
+  } = { ...RESUBSCRIBE_RESET, updated_at: nowEpochMs() };
+  if (opts.folderId !== undefined) set.folder_id = opts.folderId;
   for (const group of chunk(feedIds, RESUBSCRIBE_UPDATE_CHUNK)) {
     await db.update(feeds).set(set).where(inArray(feeds.id, group));
   }

@@ -3,10 +3,27 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { nowEpochMs } from "../timestamp";
+
+/**
+ * Curseur de delta sync (#69, ADR 0018) : horodatage de la dernière **mutation
+ * de domaine** d'une ligne, en **epoch-ms** (entier), distinct des autres
+ * timestamps du repo qui sont du texte ISO. Posé à la création et bumpé à chaque
+ * écriture de domaine, jamais par les écritures de santé/polling d'un Feed
+ * (etag, last_check_at… : sinon le delta re-pousserait le Feed à chaque poll).
+ * `$defaultFn` pose la valeur côté code à l'INSERT : SQLite refuse un défaut
+ * non-constant (`unixepoch()`) en ADD COLUMN NOT NULL, donc on ne s'appuie pas
+ * sur un défaut SQL applicatif.
+ */
+const updatedAtColumn = () =>
+  integer("updated_at")
+    .notNull()
+    .$defaultFn(() => nowEpochMs());
 
 /**
  * Ligne unique de configuration globale (singleton, id toujours 1).
@@ -111,6 +128,8 @@ export const feeds = sqliteTable("feeds", {
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  /** Curseur de delta sync (#69) ; bumpé par les mutations de domaine, pas le polling. */
+  updated_at: updatedAtColumn(),
 });
 
 /**
@@ -158,6 +177,8 @@ export const articles = sqliteTable(
     created_at: text("created_at")
       .notNull()
       .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+    /** Curseur de delta sync (#69) : bumpé par Read/Saved/mark-all-read, posé à l'ingestion. */
+    updated_at: updatedAtColumn(),
   },
   (table) => [
     // Déduplication par flux (ADR 0001) : même clé dans le même feed = même Article.
@@ -181,4 +202,42 @@ export const folders = sqliteTable("folders", {
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+  /** Curseur de delta sync (#69) : bumpé par création/renommage. */
+  updated_at: updatedAtColumn(),
 });
+
+/**
+ * Tombstones (#69, ADR 0018) : trace des suppressions destructives, lue par le
+ * delta sync (`GET /api/sync`, #72 à venir) pour propager au réplica local
+ * l'éviction d'une entité disparue. Alimentée par la **purge** de rétention et
+ * les **Delete** (Feed/Folder) — qui faisaient jusqu'ici un hard-delete sans
+ * trace. Le **désabonnement** (#14) n'écrit PAS de tombstone Feed (la ligne
+ * Feed subsiste et « descend » via son `updated_at`), mais ses articles purgés
+ * suivent le chemin de suppression tracé comme la purge.
+ *
+ * PK composite `(entity_type, entity_id)` : une re-suppression de la même entité
+ * est idempotente (upsert sur conflit), sans accumuler de doublons.
+ */
+export const tombstones = sqliteTable(
+  "tombstones",
+  {
+    /** Type d'entité supprimée. Borné à {article, feed, folder}. */
+    entity_type: text("entity_type", {
+      enum: ["article", "feed", "folder"],
+    }).notNull(),
+    /** UUID de l'entité supprimée. */
+    entity_id: text("entity_id").notNull(),
+    /** Horodatage de suppression en epoch-ms (entier, même base que `updated_at`). */
+    deleted_at: integer("deleted_at")
+      .notNull()
+      .$defaultFn(() => nowEpochMs()),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entity_type, table.entity_id] }),
+    // Défense en base, redondante avec l'enum TS, contre une valeur hors domaine.
+    check(
+      "tombstones_entity_type_valid",
+      sql`${table.entity_type} in ('article', 'feed', 'folder')`,
+    ),
+  ],
+);

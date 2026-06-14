@@ -71,6 +71,13 @@
       "when": 1780964257959,
       "tag": "0009_chilly_ravenous",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1781471590082,
+      "tag": "0010_dry_mauler",
+      "breakpoints": true
     }
   ]
 }

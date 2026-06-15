@@ -3,10 +3,11 @@ import type { ArticleListItem } from "@boreas/api-contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ARTICLES_COUNTS_KEY,
+  ARTICLES_LIST_KEY,
   markAllReadMutationOptions,
   toggleArticleReadMutationOptions,
   toggleArticleSavedMutationOptions,
-  UNREAD_LOCAL_QUERY_KEY,
 } from "./articles";
 import { readOutbox } from "./sync/outbox-store";
 import { getReplica, resetReplicaSingleton } from "./sync/replica";
@@ -93,15 +94,20 @@ describe("toggleArticleReadMutationOptions — écriture optimiste réplica + ou
     expect(ctx).toBeDefined();
   });
 
-  it("invalide la query river non-lus après écriture réplica", async () => {
+  it("invalide TOUTES les listes local-first + les compteurs après écriture réplica (#73)", async () => {
     await seed([item({ id: "a1", read: false })]);
     const spy = vi.spyOn(client, "invalidateQueries");
 
     const opts = toggleArticleReadMutationOptions(client);
     await opts.onMutate({ id: "a1", read: true });
 
+    // Toutes les vues étant local-first (#73), on invalide le préfixe complet
+    // (toutes les listes) + les compteurs locaux — plus la seule river non-lus.
     expect(spy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: UNREAD_LOCAL_QUERY_KEY }),
+      expect.objectContaining({ queryKey: ARTICLES_LIST_KEY }),
+    );
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ARTICLES_COUNTS_KEY }),
     );
   });
 });

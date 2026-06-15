@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import type {
-  ArticleCountsResponse,
   ArticleListResponse,
+  SyncFeed,
+  SyncFolder,
 } from "@boreas/api-contracts";
 import { renderHook, screen, waitFor } from "@testing-library/react";
 import { act } from "react";
@@ -26,7 +27,7 @@ vi.mock("./api", async (importActual) => {
 const mockedFetch = vi.mocked(apiFetch);
 
 beforeEach(async () => {
-  // Réplica vierge entre tests : la vue non-lus lit le store local (#72).
+  // Réplica vierge entre tests : toutes les vues lisent le store local (#73).
   await deleteReplica();
   resetReplicaSingleton();
 });
@@ -36,13 +37,20 @@ afterEach(() => {
   resetReplicaSingleton();
 });
 
-/** Pré-remplit le réplica local avec des articles non-lus. */
+/**
+ * Pré-remplit le réplica local (articles + feeds + folders). Toutes les vues
+ * étant local-first (#73), c'est la source de vérité de la liste **et** des
+ * compteurs ; l'API n'est mockée que pour les mutations et les queries annexes
+ * (feeds/folders, encore servies par l'API pour la résolution du libellé).
+ */
 async function seedReplica(
   articles: ArticleListResponse["articles"],
+  feeds: SyncFeed[] = [],
+  folders: SyncFolder[] = [],
 ): Promise<void> {
   const db = await openReplica();
   await applyDelta(db, {
-    upserts: { articles, feeds: [], folders: [] },
+    upserts: { articles, feeds, folders },
     tombstones: [],
   });
   db.close();
@@ -68,66 +76,74 @@ function item(
   };
 }
 
-/** Page de liste. */
-function page(
-  articles: ArticleListResponse["articles"],
-  nextCursor: string | null = null,
-): ArticleListResponse {
-  return { articles, nextCursor };
+/** Feed répliqué minimal, surchargeable. */
+function syncFeed(over: Partial<SyncFeed> & { id: string }): SyncFeed {
+  return {
+    id: over.id,
+    url: over.url ?? `https://src.example/${over.id}.xml`,
+    title: over.title ?? `Flux ${over.id}`,
+    status: "ok",
+    lastError: null,
+    lastCheckAt: null,
+    folderId: over.folderId ?? null,
+    unsubscribed: over.unsubscribed ?? false,
+  };
 }
 
-const emptyCounts: ArticleCountsResponse = {
-  total: 0,
-  byFeed: [],
-  byFolder: [],
-};
-
 describe("useArticleView", () => {
-  it("scope all : filter=all via API ; toggle showRead → non-lus lus depuis le réplica local (#72)", async () => {
-    // Le réplica contient un non-lu (la vue non-lus est désormais local-first).
-    await seedReplica([item("local-1", { read: false })]);
+  it("scope all : filter=all lit le réplica ; toggle showRead → non-lus depuis le réplica (#73)", async () => {
+    // Réplica : un lu + un non-lu. Tout est local-first (liste ET compteurs).
+    await seedReplica(
+      [item("a-read", { read: true }), item("a-unread", { read: false })],
+      [syncFeed({ id: "f1" })],
+    );
 
     const urls: string[] = [];
-    stubApi(mockedFetch, {
-      "GET /articles": ({ url }: ApiHandlerContext) => {
-        urls.push(url);
-        return page([item("a1")]);
-      },
-      "GET /articles/counts": {
-        ...emptyCounts,
-        total: 7,
-      } satisfies ArticleCountsResponse,
+    // Aucune route liste/counts mockée : un appel à l'API ferait échouer le test
+    // (cf. stubApi qui rejette les routes inattendues) — c'est la garantie AC#4.
+    stubApi(mockedFetch, {});
+    mockedFetch.mockImplementation((path: string) => {
+      urls.push(path);
+      return Promise.reject(new Error(`appel API inattendu : ${path}`));
     });
 
     const { result } = renderHook(() => useArticleView({ kind: "all" }), {
       wrapper: createAppWrapper(),
     });
 
-    // showRead actif par défaut → filtre `all` servi par l'API.
-    await waitFor(() => expect(result.current.articles).toHaveLength(1));
+    // showRead actif par défaut → filtre `all` : lus + non-lus depuis le réplica.
+    await waitFor(() => expect(result.current.articles).toHaveLength(2));
     expect(result.current.title).toBe("Tous les non-lus");
-    expect(result.current.unreadCount).toBe(7);
+    // Compteur global exact, calculé localement (un seul non-lu).
+    await waitFor(() => expect(result.current.unreadCount).toBe(1));
     expect(result.current.showRead).toBe(true);
-    expect(urls.some((u) => u.includes("filter=all"))).toBe(true);
 
-    // Bascule : masque les lus → filtre `unread` lu depuis le réplica LOCAL.
+    // Bascule : masque les lus → filtre `unread`, lu depuis le réplica.
     act(() => result.current.onToggleShowRead?.());
     await waitFor(() =>
-      expect(result.current.articles.map((a) => a.id)).toEqual(["local-1"]),
+      expect(result.current.articles.map((a) => a.id)).toEqual(["a-unread"]),
     );
     expect(result.current.showRead).toBe(false);
-    // Aucun appel API `filter=unread` : la river non-lus ne touche plus le réseau.
-    expect(urls.some((u) => u.includes("filter=unread"))).toBe(false);
+    // Aucun appel liste/counts : les vues ne touchent plus le réseau (AC#4).
+    expect(urls.some((u) => u.startsWith("/articles"))).toBe(false);
   });
 
   it("scope all : onRefresh poste /refresh ; onMarkAllRead poste scope global", async () => {
+    await seedReplica([item("a1")], [syncFeed({ id: "f1" })]);
     const calls: { path: string; body: unknown }[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": page([item("a1")]),
-      "GET /articles/counts": emptyCounts,
       "POST /refresh": ({ url }: ApiHandlerContext) => {
         calls.push({ path: url, body: undefined });
         return { enqueued: 1 };
+      },
+      // mark-all-read est local-first : la mutation flushe via syncReplica, dont
+      // le pull tombe sur /sync (page vide) ; mark-read part par l'outbox au flush.
+      "GET /sync": {
+        upserts: { articles: [], feeds: [], folders: [] },
+        tombstones: [],
+        cursor: null,
+        complete: true,
+        stale: false,
       },
       "POST /articles/mark-read": ({ body, url }: ApiHandlerContext) => {
         calls.push({ path: url, body });
@@ -153,14 +169,13 @@ describe("useArticleView", () => {
     });
   });
 
-  it("scope feed : libellé, scope feedId, markAllRead scope feed, pas de showRead/refresh", async () => {
-    const urls: string[] = [];
+  it("scope feed : libellé, articles du feed, markAllRead scope feed, pas de showRead/refresh", async () => {
+    await seedReplica(
+      [item("a-f1", { feedId: "f1" }), item("a-f2", { feedId: "f2" })],
+      [syncFeed({ id: "f1", title: "Mon flux" }), syncFeed({ id: "f2" })],
+    );
     const markBodies: unknown[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }: ApiHandlerContext) => {
-        urls.push(url);
-        return page([item("a1")]);
-      },
       "GET /feeds": {
         feeds: [
           {
@@ -172,6 +187,13 @@ describe("useArticleView", () => {
             lastError: null,
           },
         ],
+      },
+      "GET /sync": {
+        upserts: { articles: [], feeds: [], folders: [] },
+        tombstones: [],
+        cursor: null,
+        complete: true,
+        stale: false,
       },
       "POST /articles/mark-read": ({ body }: ApiHandlerContext) => {
         markBodies.push(body);
@@ -185,7 +207,10 @@ describe("useArticleView", () => {
     );
 
     await waitFor(() => expect(result.current.title).toBe("Mon flux"));
-    expect(urls.some((u) => u.includes("feedId=f1"))).toBe(true);
+    // La vue par Feed ne montre que les articles de f1 (réplica filtré localement).
+    await waitFor(() =>
+      expect(result.current.articles.map((a) => a.id)).toEqual(["a-f1"]),
+    );
     expect(result.current.showRead).toBeUndefined();
     expect(result.current.onToggleShowRead).toBeUndefined();
     expect(result.current.onRefresh).toBeUndefined();
@@ -198,7 +223,6 @@ describe("useArticleView", () => {
 
   it("scope feed : flux introuvable", async () => {
     stubApi(mockedFetch, {
-      "GET /articles": page([]),
       "GET /feeds": { feeds: [] },
     });
 
@@ -211,23 +235,36 @@ describe("useArticleView", () => {
     expect(result.current.emptyLabel).toBe("Ce flux n'existe pas ou plus.");
   });
 
-  it("scope folder : nom, unreadCount via byFolder, markAllRead scope folder", async () => {
-    const urls: string[] = [];
+  it("scope folder : nom, articles agrégés, unreadCount local via byFolder, markAllRead scope folder", async () => {
+    await seedReplica(
+      [
+        item("a-fa", { feedId: "fa" }),
+        item("a-fb", { feedId: "fb" }),
+        item("a-fc", { feedId: "fc" }),
+      ],
+      [
+        syncFeed({ id: "fa", folderId: "fo1" }),
+        syncFeed({ id: "fb", folderId: "fo1" }),
+        syncFeed({ id: "fc", folderId: "fo2" }),
+      ],
+      [
+        { id: "fo1", name: "Tech" },
+        { id: "fo2", name: "Autre" },
+      ],
+    );
     const markBodies: unknown[] = [];
     stubApi(mockedFetch, {
-      "GET /articles": ({ url }: ApiHandlerContext) => {
-        urls.push(url);
-        return page([item("a1")]);
-      },
       "GET /folders": { folders: [{ id: "fo1", name: "Tech" }] },
-      "GET /articles/counts": {
-        total: 0,
-        byFeed: [],
-        byFolder: [{ folderId: "fo1", count: 4 }],
-      } satisfies ArticleCountsResponse,
+      "GET /sync": {
+        upserts: { articles: [], feeds: [], folders: [] },
+        tombstones: [],
+        cursor: null,
+        complete: true,
+        stale: false,
+      },
       "POST /articles/mark-read": ({ body }: ApiHandlerContext) => {
         markBodies.push(body);
-        return { updated: 4 };
+        return { updated: 2 };
       },
     });
 
@@ -237,8 +274,15 @@ describe("useArticleView", () => {
     );
 
     await waitFor(() => expect(result.current.title).toBe("Tech"));
-    await waitFor(() => expect(result.current.unreadCount).toBe(4));
-    expect(urls.some((u) => u.includes("folderId=fo1"))).toBe(true);
+    // Agrégat local des feeds du dossier (fa + fb), fc exclu.
+    await waitFor(() =>
+      expect(result.current.articles.map((a) => a.id).sort()).toEqual([
+        "a-fa",
+        "a-fb",
+      ]),
+    );
+    // unreadCount = compteur local byFolder (2 non-lus dans fo1).
+    await waitFor(() => expect(result.current.unreadCount).toBe(2));
 
     act(() => result.current.onMarkAllRead?.());
     await waitFor(() =>
@@ -248,9 +292,7 @@ describe("useArticleView", () => {
 
   it("scope folder : dossier introuvable", async () => {
     stubApi(mockedFetch, {
-      "GET /articles": page([]),
       "GET /folders": { folders: [] },
-      "GET /articles/counts": emptyCounts,
     });
 
     const { result } = renderHook(
@@ -264,62 +306,64 @@ describe("useArticleView", () => {
     expect(result.current.emptyLabel).toBe("Ce dossier n'existe pas ou plus.");
   });
 
-  it("scope saved : filter=saved, pas de toggleRead/markAllRead/showRead", async () => {
-    const urls: string[] = [];
-    stubApi(mockedFetch, {
-      "GET /articles": ({ url }: ApiHandlerContext) => {
-        urls.push(url);
-        return page([item("s1", { saved: true })]);
-      },
-    });
+  it("scope saved : ne montre que les Saved (réplica), pas de toggleRead/markAllRead/showRead", async () => {
+    await seedReplica(
+      [item("s1", { saved: true }), item("not-saved", { saved: false })],
+      [syncFeed({ id: "f1" })],
+    );
+    stubApi(mockedFetch, {});
 
     const { result } = renderHook(() => useArticleView({ kind: "saved" }), {
       wrapper: createAppWrapper(),
     });
 
-    await waitFor(() => expect(result.current.articles).toHaveLength(1));
+    await waitFor(() =>
+      expect(result.current.articles.map((a) => a.id)).toEqual(["s1"]),
+    );
     expect(result.current.title).toBe("Saved");
-    expect(urls.some((u) => u.includes("filter=saved"))).toBe(true);
     expect(result.current.onToggleRead).toBeUndefined();
     expect(result.current.onMarkAllRead).toBeUndefined();
     expect(result.current.showRead).toBeUndefined();
     expect(result.current.onToggleSaved).toBeDefined();
   });
 
-  it("pagination : onEndReached charge la page suivante (cursor)", async () => {
-    const urls: string[] = [];
-    stubApi(mockedFetch, {
-      "GET /articles": ({ url }: ApiHandlerContext) => {
-        urls.push(url);
-        if (url.includes("cursor=c1")) return page([item("a2")]);
-        return page([item("a1")], "c1");
-      },
-      "GET /articles/counts": emptyCounts,
-    });
+  it("pagination : onEndReached charge la page suivante depuis le réplica", async () => {
+    // Un corpus > 1 page (PAGE_SIZE=30) répliqué localement : la pagination
+    // keyset locale doit servir la 2ᵉ page sans appel réseau.
+    const articles = Array.from({ length: 35 }, (_, i) =>
+      item(`art-${String(i).padStart(2, "0")}`, {
+        publishedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      }),
+    );
+    await seedReplica(articles, [syncFeed({ id: "f1" })]);
+    stubApi(mockedFetch, {});
 
     const { result } = renderHook(() => useArticleView({ kind: "all" }), {
       wrapper: createAppWrapper(),
     });
 
     await waitFor(() => expect(result.current.hasNextPage).toBe(true));
+    expect(result.current.articles).toHaveLength(30);
     act(() => result.current.onEndReached());
-    await waitFor(() => expect(result.current.articles).toHaveLength(2));
-    expect(urls.some((u) => u.includes("cursor=c1"))).toBe(true);
+    await waitFor(() => expect(result.current.articles).toHaveLength(35));
   });
 
-  it("scope saved : unsave retire l'article de la vue", async () => {
-    // Stub avec état serveur : une fois désauvé, l'article ne fait plus partie
-    // de la liste `filter=saved` (le `onSettled` réaligne la vue sur le serveur).
-    const saved = new Set(["s1"]);
+  it("scope saved : unsave retire l'article de la vue (réplica relu)", async () => {
+    await seedReplica([item("s1", { saved: true })], [syncFeed({ id: "f1" })]);
+    // La mutation Saved écrit le réplica (saved=false) puis flushe ; le pull /sync
+    // est vide. La vue saved relit le réplica → l'article désauvé en disparaît.
     stubApi(mockedFetch, {
-      "GET /articles": () =>
-        page([...saved].map((id) => item(id, { saved: true }))),
-      "PATCH /articles/:id": ({ params, body }: ApiHandlerContext) => {
-        const id = params.id as string;
-        const patch = body as { saved?: boolean };
-        if (patch.saved === false) saved.delete(id);
-        return { id, ...patch };
+      "GET /sync": {
+        upserts: { articles: [], feeds: [], folders: [] },
+        tombstones: [],
+        cursor: null,
+        complete: true,
+        stale: false,
       },
+      "PATCH /articles/:id": ({ params, body }: ApiHandlerContext) => ({
+        id: params.id as string,
+        ...(body as Record<string, unknown>),
+      }),
     });
 
     const { result } = renderHook(() => useArticleView({ kind: "saved" }), {

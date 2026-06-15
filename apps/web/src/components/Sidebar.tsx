@@ -6,7 +6,7 @@ import {
   PointerSensor,
 } from "@dnd-kit/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { articleCountsQueryOptions } from "../lib/articles";
 import { AUTH_QUERY_KEY, logout } from "../lib/auth";
@@ -14,6 +14,7 @@ import { feedsQueryOptions } from "../lib/feeds";
 import { foldersQueryOptions } from "../lib/folders";
 import { FolderTree } from "./sidebar/FolderTree";
 import { SidebarDialogs } from "./sidebar/SidebarDialogs";
+import { SidebarSearch } from "./sidebar/SidebarSearch";
 import {
   type FeedDragData,
   groupFeedsByFolder,
@@ -68,6 +69,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const feeds = useQuery(feedsQueryOptions());
   const folders = useQuery(foldersQueryOptions());
 
+  // Requête de recherche courante (#73) : reflète `?q` quand on est sur `/search`,
+  // sinon vide. `strict: false` : la sidebar est montée hors d'une route précise.
+  const { q: searchQuery } = useSearch({ strict: false }) as { q?: string };
+
   const lifecycle = useFeedLifecycle();
 
   const unreadByFeed = useMemo(
@@ -111,6 +116,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex h-14 items-center px-4">
         <BrandLogo />
       </div>
+
+      <SidebarSearch initialQuery={searchQuery ?? ""} onNavigate={onNavigate} />
 
       <DragDropProvider sensors={dragSensors} onDragEnd={handleDragEnd}>
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 pb-2">

@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
+import { Route as ShellSearchRouteImport } from './routes/_shell.search'
 import { Route as ShellSavedRouteImport } from './routes/_shell.saved'
 import { Route as ShellFoldersFolderIdRouteImport } from './routes/_shell.folders.$folderId'
 import { Route as ShellFeedsFeedIdRouteImport } from './routes/_shell.feeds.$feedId'
@@ -36,6 +37,11 @@ const ShellSettingsRoute = ShellSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellSearchRoute = ShellSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellSavedRoute = ShellSavedRouteImport.update({
   id: '/saved',
   path: '/saved',
@@ -56,6 +62,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/login': typeof LoginRoute
   '/saved': typeof ShellSavedRoute
+  '/search': typeof ShellSearchRoute
   '/settings': typeof ShellSettingsRoute
   '/feeds/$feedId': typeof ShellFeedsFeedIdRoute
   '/folders/$folderId': typeof ShellFoldersFolderIdRoute
@@ -63,6 +70,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/saved': typeof ShellSavedRoute
+  '/search': typeof ShellSearchRoute
   '/settings': typeof ShellSettingsRoute
   '/': typeof ShellIndexRoute
   '/feeds/$feedId': typeof ShellFeedsFeedIdRoute
@@ -73,6 +81,7 @@ export interface FileRoutesById {
   '/_shell': typeof ShellRouteWithChildren
   '/login': typeof LoginRoute
   '/_shell/saved': typeof ShellSavedRoute
+  '/_shell/search': typeof ShellSearchRoute
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/feeds/$feedId': typeof ShellFeedsFeedIdRoute
@@ -84,6 +93,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/saved'
+    | '/search'
     | '/settings'
     | '/feeds/$feedId'
     | '/folders/$folderId'
@@ -91,6 +101,7 @@ export interface FileRouteTypes {
   to:
     | '/login'
     | '/saved'
+    | '/search'
     | '/settings'
     | '/'
     | '/feeds/$feedId'
@@ -100,6 +111,7 @@ export interface FileRouteTypes {
     | '/_shell'
     | '/login'
     | '/_shell/saved'
+    | '/_shell/search'
     | '/_shell/settings'
     | '/_shell/'
     | '/_shell/feeds/$feedId'
@@ -141,6 +153,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/search': {
+      id: '/_shell/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof ShellSearchRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/_shell/saved': {
       id: '/_shell/saved'
       path: '/saved'
@@ -167,6 +186,7 @@ declare module '@tanstack/react-router' {
 
 interface ShellRouteChildren {
   ShellSavedRoute: typeof ShellSavedRoute
+  ShellSearchRoute: typeof ShellSearchRoute
   ShellSettingsRoute: typeof ShellSettingsRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellFeedsFeedIdRoute: typeof ShellFeedsFeedIdRoute
@@ -175,6 +195,7 @@ interface ShellRouteChildren {
 
 const ShellRouteChildren: ShellRouteChildren = {
   ShellSavedRoute: ShellSavedRoute,
+  ShellSearchRoute: ShellSearchRoute,
   ShellSettingsRoute: ShellSettingsRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellFeedsFeedIdRoute: ShellFeedsFeedIdRoute,

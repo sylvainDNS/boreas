@@ -53,7 +53,7 @@ function Empty() {
  * sur les routes réelles — toute divergence est un faux signal de test.
  *
  * Cf. `apps/web/src/routeTree.gen.ts` (FileRoutesByFullPath) :
- *   `/` `/login` `/saved` `/settings` `/feeds/$feedId` `/folders/$folderId`.
+ *   `/` `/login` `/saved` `/search` `/settings` `/feeds/$feedId` `/folders/$folderId`.
  * La pathless layout `_shell` enveloppe tout sauf `/login`, mais ici on aplatit
  * sous la racine : la sémantique des chemins testés est identique.
  *
@@ -79,6 +79,7 @@ function buildTestRouteTree(renderUi: () => ReactNode) {
     makeLeaf("/"),
     makeLeaf("/login"),
     makeLeaf("/saved"),
+    makeLeaf("/search"),
     makeLeaf("/settings"),
     makeLeaf("/feeds/$feedId"),
     makeLeaf("/folders/$folderId"),

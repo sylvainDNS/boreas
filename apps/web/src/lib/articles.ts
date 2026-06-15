@@ -14,13 +14,13 @@ import {
 } from "@tanstack/react-query";
 import { apiFetch } from "./api";
 import { readArticleDetail } from "./sync/article-detail-repository";
+import { localArticleCounts, readArticlePage } from "./sync/article-repository";
 import {
   enqueueOutbox,
   markReadInReplica,
   setArticleFieldInReplica,
 } from "./sync/outbox-store";
 import { getReplica, syncReplica } from "./sync/replica";
-import { readUnreadPage } from "./sync/unread-repository";
 import { formatRelativeTime } from "./time";
 
 /**
@@ -110,32 +110,25 @@ export function articlesListQueryKey(
   return [...ARTICLES_LIST_KEY, filter, feedId ?? null, folderId ?? null];
 }
 
-/** Clé de la river « Tous les non-lus » locale (#72), lue depuis le réplica. */
-export const UNREAD_LOCAL_QUERY_KEY = articlesListQueryKey("unread");
-
-/** Clé du cache des compteurs de non-lus exacts. */
+/** Clé du cache des compteurs de non-lus exacts (calculés localement, #73). */
 export const ARTICLES_COUNTS_KEY = ["articles", "counts"] as const;
 
 /**
- * Intervalle de poll des listes/compteurs (#10). En complément du refetch au
- * focus (déjà actif, `main.tsx`), il fait remonter les articles ingérés en
- * arrière-plan par le Cron/Queue sans action de l'utilisateur. Partagé avec la
- * query des feeds (#11) pour un rythme de rafraîchissement unique.
+ * Préfixe de clé du cache de la **recherche locale** (#73). Invalidé aux mêmes
+ * points que les listes pour que les résultats de recherche reflètent les
+ * bascules Read/Saved et les nouveaux articles synchronisés (la recherche lit le
+ * réplica, comme les listes). Défini ici — et non dans `use-search-view` — pour
+ * que les mutations et le moteur de sync l'invalident sans import circulaire.
  */
-export const POLL_INTERVAL_MS = 60_000;
+export const SEARCH_QUERY_KEY = ["articles", "search"] as const;
 
 /**
- * Vrai pour la **seule** vue qui lit le réplica local en #72 : « Tous les
- * non-lus » = filtre `unread`, sans Feed ni Folder (ADR 0018). Les autres vues
- * (all, feed, folder, saved) restent sur l'API jusqu'à leur bascule en #73.
+ * Intervalle de poll historique des listes/compteurs (#10). Conservé pour les
+ * queries encore servies par l'API (feeds/folders, #11/#13). Les listes
+ * d'articles et les compteurs sont désormais **local-first** (#73) : rafraîchis
+ * par le moteur de sync (focus/online/intervalle), ils n'utilisent plus ce poll.
  */
-function isLocalUnreadView(
-  filter: ArticleFilter,
-  feedId?: string,
-  folderId?: string,
-): boolean {
-  return filter === "unread" && !feedId && !folderId;
-}
+export const POLL_INTERVAL_MS = 60_000;
 
 /**
  * Query infinie de la liste : pagination keyset par `cursor`, du plus récent au
@@ -144,49 +137,51 @@ function isLocalUnreadView(
  * distinct. `feedId` et `folderId` sont mutuellement exclusifs en pratique. Le
  * scroll infini déclenche `fetchNextPage`.
  *
- * **Frontière local-first (#72, ADR 0018)** : pour la vue « Tous les non-lus »
- * (filtre `unread`, sans Feed/Folder), le `queryFn` lit le **réplica local**
- * (repository) au lieu de l'API — l'UI ne fait alors aucun appel réseau direct.
- * Le moteur de sync est seul à parler au backend (déclencheurs focus/online/
- * intervalle), si bien que cette vue n'a plus besoin du poll 60 s : on coupe
- * `refetchInterval` pour ce cas. Les autres vues conservent API + poll.
+ * **Frontière local-first (#73, ADR 0018)** : **toutes** les vues (all, unread,
+ * saved, par Feed, par Folder) lisent désormais le **réplica local** via le
+ * repository — l'UI ne fait plus aucun appel réseau direct pour les listes. Le
+ * moteur de sync est seul à parler au backend (focus/online/intervalle), si bien
+ * que ces vues n'ont plus besoin du poll 60 s : `refetchInterval` est coupé. Le
+ * repository reproduit exactement le filtrage/tri/pagination de l'API.
  */
 export function listArticlesInfiniteQueryOptions(
   filter: ArticleFilter,
   feedId?: string,
   folderId?: string,
 ) {
-  const local = isLocalUnreadView(filter, feedId, folderId);
   return infiniteQueryOptions({
     queryKey: articlesListQueryKey(filter, feedId, folderId),
     initialPageParam: undefined as string | undefined,
-    queryFn: async ({ pageParam }) => {
-      if (local) {
-        // Lecture du réplica : forme `ArticleListResponse` identique à l'API,
-        // pour que `useInfiniteQuery`/`toArticle` restent inchangés.
-        return readUnreadPage(await getReplica(), pageParam);
-      }
-      const params = new URLSearchParams({ filter });
-      if (feedId) params.set("feedId", feedId);
-      if (folderId) params.set("folderId", folderId);
-      if (pageParam) params.set("cursor", pageParam);
-      return apiFetch<ArticleListResponse>(`/articles?${params.toString()}`);
-    },
+    queryFn: async ({ pageParam }) =>
+      // Lecture du réplica : forme `ArticleListResponse` identique à l'API,
+      // pour que `useInfiniteQuery`/`toArticle` restent inchangés.
+      readArticlePage(
+        await getReplica(),
+        { filter, feedId, folderId },
+        pageParam,
+      ),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    // La vue locale est rafraîchie par le moteur de sync (focus/online/
-    // intervalle), pas par le poll de liste : on désactive `refetchInterval`.
-    refetchInterval: local ? false : POLL_INTERVAL_MS,
+    // Vue rafraîchie par le moteur de sync (focus/online/intervalle), pas par le
+    // poll de liste : on désactive `refetchInterval`.
+    refetchInterval: false,
   });
 }
 
 /** Compteurs de non-lus exacts : total + agrégat par Feed (#8) et par Folder (#13). */
 export type ArticleCounts = ArticleCountsResponse;
 
+/**
+ * Compteurs de non-lus **calculés localement** depuis le réplica (#73, ADR 0018).
+ * Même forme `ArticleCounts` que l'ex-`GET /api/articles/counts` (consommateurs
+ * `Sidebar`/`useArticleView` inchangés), mais exacts **hors-ligne** : plus aucun
+ * appel à `/articles/counts` côté affichage. Rafraîchis par le moteur de sync et
+ * les mutations optimistes (qui invalident `ARTICLES_COUNTS_KEY`).
+ */
 export function articleCountsQueryOptions() {
   return queryOptions({
     queryKey: ARTICLES_COUNTS_KEY,
-    queryFn: () => apiFetch<ArticleCounts>("/articles/counts"),
-    refetchInterval: POLL_INTERVAL_MS,
+    queryFn: async () => localArticleCounts(await getReplica()),
+    refetchInterval: false,
   });
 }
 
@@ -202,6 +197,7 @@ export function refreshMutationOptions(queryClient: QueryClient) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
     },
   };
 }
@@ -348,12 +344,18 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
         field: "saved",
         value: saved,
       });
-      // (3) Caches react-query des vues encore servies par l'API (#73).
+      // (3) Caches react-query : flip optimiste immédiat des listes (toutes
+      // local-first, #73) + du cache détail (deep-link hors liste). Le réplica
+      // étant déjà écrit, l'invalidation ci-dessous reconverge ; le flip évite
+      // un clignotement le temps de la relecture.
       setArticleSavedInListCaches(queryClient, id, saved);
       setArticleSavedInDetailCache(queryClient, id, saved);
       if (!saved) removeArticleFromSavedCache(queryClient, id);
-      // Rafraîchit la vue non-lus (qui relit le réplica fraîchement écrit).
-      void queryClient.invalidateQueries({ queryKey: UNREAD_LOCAL_QUERY_KEY });
+      // Rafraîchit TOUTES les listes local-first (#73) + les compteurs locaux,
+      // qui relisent le réplica fraîchement écrit.
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
       return { previous, previousDetail, detailKey };
     },
     onError: (
@@ -423,10 +425,13 @@ export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
         field: "read",
         value: read,
       });
-      // (3) Caches react-query des vues encore servies par l'API (#73).
+      // (3) Caches react-query : flip optimiste immédiat des listes (toutes
+      // local-first, #73). Le réplica étant déjà écrit, l'invalidation reconverge.
       setArticleReadInListCaches(queryClient, id, read);
-      // Rafraîchit la vue non-lus (qui relit le réplica fraîchement écrit).
-      void queryClient.invalidateQueries({ queryKey: UNREAD_LOCAL_QUERY_KEY });
+      // Rafraîchit TOUTES les listes local-first (#73) + les compteurs locaux.
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
       return { previous };
     },
     onError: (
@@ -467,13 +472,11 @@ export function markAllReadMutationOptions(queryClient: QueryClient) {
       await markReadInReplica(db, scope);
       // (2) Outbox : UNE entrée de portée (push en une requête, pas N patchs).
       await enqueueOutbox(db, { kind: "markRead", scope });
-      // (3) Rafraîchit la vue non-lus + invalide les vues encore API (#73).
-      void queryClient.invalidateQueries({ queryKey: UNREAD_LOCAL_QUERY_KEY });
-    },
-    onSettled: () => {
-      // Vues encore servies par l'API (#73) + compteurs : ré-alignement serveur.
+      // (3) Rafraîchit TOUTES les listes local-first (#73) + les compteurs locaux,
+      // qui relisent le réplica fraîchement marqué.
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
     },
   };
 }

@@ -5,6 +5,7 @@ import { enqueueOutbox } from "./outbox-store";
 import {
   applyDelta,
   deleteReplica,
+  garbageCollectContent,
   missingContentIds,
   openReplica,
   type ReplicaDb,
@@ -271,5 +272,71 @@ describe("replica-store — wipe", () => {
     expect(await fresh.count("articles")).toBe(0);
     expect(await readSyncCursor(fresh)).toBeNull();
     fresh.close();
+  });
+});
+
+describe("replica-store — garbageCollectContent (#81)", () => {
+  it("évince le HTML d'un article Read non-Saved, garde le corpus, préserve les métadonnées", async () => {
+    await applyDelta(db, {
+      upserts: {
+        articles: [
+          article({ id: "unread" }), // non-lu → reste
+          article({ id: "saved", read: true, saved: true }), // lu mais Saved → reste
+          article({ id: "read", read: true, saved: false }), // lu non-Saved → évincé
+        ],
+        feeds: [],
+        folders: [],
+      },
+      tombstones: [],
+    });
+    await writeArticleContent(db, "unread", "<p>unread</p>");
+    await writeArticleContent(db, "saved", "<p>saved</p>");
+    await writeArticleContent(db, "read", "<p>read</p>");
+
+    const kept = await garbageCollectContent(db);
+
+    // HTML : le Read-non-Saved est évincé, les deux autres restent.
+    expect(await readArticleContent(db, "unread")).toBe("<p>unread</p>");
+    expect(await readArticleContent(db, "saved")).toBe("<p>saved</p>");
+    expect(await readArticleContent(db, "read")).toBeUndefined();
+    // Métadonnées : intactes pour TOUS, y compris le Read-non-Saved.
+    expect(await db.get("articles", "read")).toMatchObject({ id: "read" });
+    // Renvoie les HTML conservés (pour le recalcul des images référencées).
+    expect(kept.sort()).toEqual(["<p>saved</p>", "<p>unread</p>"]);
+  });
+
+  it("évince le HTML d'un article dont les métadonnées ont disparu (tombstone)", async () => {
+    // Contenu présent mais aucune métadonnée (article tombstoné) → hors corpus.
+    await writeArticleContent(db, "orphan", "<p>orphan</p>");
+    const kept = await garbageCollectContent(db);
+    expect(await readArticleContent(db, "orphan")).toBeUndefined();
+    expect(kept).toEqual([]);
+  });
+
+  it("ne renvoie pas les HTML null mais conserve leur clé (corpus)", async () => {
+    await applyDelta(db, {
+      upserts: { articles: [article({ id: "u" })], feeds: [], folders: [] },
+      tombstones: [],
+    });
+    await writeArticleContent(db, "u", null); // dans le corpus, sans contenu extrait.
+    const kept = await garbageCollectContent(db);
+    expect(kept).toEqual([]); // html null exclu du résultat (rien à référencer).
+    expect(await readArticleContent(db, "u")).toBeNull(); // clé conservée.
+  });
+
+  it("est idempotent (relancé, n'évince rien de plus)", async () => {
+    await applyDelta(db, {
+      upserts: {
+        articles: [article({ id: "read", read: true })],
+        feeds: [],
+        folders: [],
+      },
+      tombstones: [],
+    });
+    await writeArticleContent(db, "read", "<p>read</p>");
+    await garbageCollectContent(db);
+    const kept = await garbageCollectContent(db);
+    expect(kept).toEqual([]);
+    expect(await readArticleContent(db, "read")).toBeUndefined();
   });
 });

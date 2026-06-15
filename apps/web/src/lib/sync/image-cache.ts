@@ -104,3 +104,57 @@ async function warmOne(cache: Cache, url: string): Promise<void> {
     // (focus/online) la re-tentera. Une image manquante n'empêche pas la lecture.
   }
 }
+
+/**
+ * **Réconciliation du cache d'images** (#81, ADR 0018) — le pendant du GC du
+ * contenu (`garbageCollectContent`) côté Cache Storage : supprime de
+ * `IMAGE_CACHE` toute image qui n'est **plus référencée par aucun** HTML
+ * conservé. C'est le « GC images différé par #77 ».
+ *
+ * `referencedUrls` = l'ensemble des `src` proxifiés cités par les HTML encore en
+ * store (calculé par le moteur via `imageUrlsFromHtml` sur le résultat du GC).
+ * Une même image pouvant être citée par plusieurs articles, on **compte les
+ * références par l'union** : on garde toute clé présente dans cet ensemble, on
+ * n'évince que les **clés absentes**. On compare sur le **pathname + search**
+ * (`/api/img?…`), forme stable des `src` (cf. `imageUrlsFromHtml`), car les clés
+ * du cache sont des `Request` d'URL absolue.
+ *
+ * Best-effort de bout en bout, **no-op** si `caches` est indisponible (SSR/tests
+ * sans Cache Storage) ; chaque `delete` est isolé (un échec ne bloque pas le
+ * reste ni la passe de sync). Ne touche **que** `IMAGE_CACHE` (pas le precache du
+ * shell ni quoi que ce soit d'autre).
+ */
+export async function reconcileImageCache(
+  referencedUrls: Iterable<string>,
+): Promise<void> {
+  const cacheStorage = (globalThis as { caches?: CacheStorage }).caches;
+  if (!cacheStorage) return;
+
+  let cache: Cache;
+  try {
+    cache = await cacheStorage.open(IMAGE_CACHE);
+  } catch {
+    return; // ouverture impossible : best-effort, on abandonne la réconciliation.
+  }
+
+  const referenced = new Set(referencedUrls);
+  let keys: readonly Request[];
+  try {
+    keys = await cache.keys();
+  } catch {
+    return;
+  }
+
+  for (const request of keys) {
+    // Clé de cache = `Request` (URL absolue) ; on la ramène à la forme relative
+    // `/api/img?…` des `src` du HTML pour comparer à l'ensemble des références.
+    const url = new URL(request.url);
+    const relative = `${url.pathname}${url.search}`;
+    if (referenced.has(relative)) continue;
+    try {
+      await cache.delete(request);
+    } catch {
+      // Suppression impossible (course, quota) : best-effort, on passe à la suivante.
+    }
+  }
+}

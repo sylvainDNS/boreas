@@ -21,6 +21,7 @@ import {
   setArticleFieldInReplica,
 } from "./sync/outbox-store";
 import { getReplica, syncReplica } from "./sync/replica";
+import { OUTBOX_COUNT_KEY } from "./sync/use-outbox";
 import { formatRelativeTime } from "./time";
 
 /**
@@ -356,6 +357,8 @@ export function toggleArticleSavedMutationOptions(queryClient: QueryClient) {
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
       void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
+      // Badge « actions en attente » (#81) : une entrée vient d'être empilée.
+      void queryClient.invalidateQueries({ queryKey: OUTBOX_COUNT_KEY });
       return { previous, previousDetail, detailKey };
     },
     onError: (
@@ -432,6 +435,8 @@ export function toggleArticleReadMutationOptions(queryClient: QueryClient) {
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
       void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
+      // Badge « actions en attente » (#81) : une entrée vient d'être empilée.
+      void queryClient.invalidateQueries({ queryKey: OUTBOX_COUNT_KEY });
       return { previous };
     },
     onError: (
@@ -477,6 +482,8 @@ export function markAllReadMutationOptions(queryClient: QueryClient) {
       void queryClient.invalidateQueries({ queryKey: ARTICLES_LIST_KEY });
       void queryClient.invalidateQueries({ queryKey: ARTICLES_COUNTS_KEY });
       void queryClient.invalidateQueries({ queryKey: SEARCH_QUERY_KEY });
+      // Badge « actions en attente » (#81) : une entrée de portée empilée.
+      void queryClient.invalidateQueries({ queryKey: OUTBOX_COUNT_KEY });
     },
   };
 }

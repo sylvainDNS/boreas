@@ -322,3 +322,49 @@ export async function missingContentIds(
   const present = new Set(await db.getAllKeys("content"));
   return ids.filter((id) => !present.has(id));
 }
+
+/**
+ * **GC du contenu local** (#81, ADR 0018 « Corpus à deux étages ») : évince du
+ * store `content` le HTML de tout article qui a **quitté le corpus offline**
+ * (`non-lus ∪ Saved`), c.-à-d. devenu **Read non-Saved** — ou dont les
+ * métadonnées n'existent plus (tombstone déjà appliqué). Les **métadonnées**
+ * (store `articles`) ne sont **pas** touchées : seul le HTML lourd part ; elles
+ * ne disparaissent qu'à réception d'un tombstone (via `applyDelta`).
+ *
+ * Renvoie l'ensemble des **HTML conservés** (corpus restant) : le moteur s'en
+ * sert pour recalculer les images encore référencées et réconcilier le Cache
+ * Storage (cf. `reconcileImageCache`). On lit articles+content dans **une seule
+ * transaction** : aucun upsert concurrent ne peut faire ré-entrer un article au
+ * corpus entre la lecture et l'éviction.
+ *
+ * Idempotent : relancé sur un store déjà GCé, il ne supprime rien de plus (les
+ * articles hors corpus n'ont déjà plus de HTML).
+ */
+export async function garbageCollectContent(db: ReplicaDb): Promise<string[]> {
+  const tx = db.transaction(["articles", "content"], "readwrite");
+  const articlesStore = tx.objectStore("articles");
+  const contentStore = tx.objectStore("content");
+
+  // Set des ids encore dans le corpus offline (non-lus ∪ Saved) : seuls eux
+  // gardent leur HTML. Un article absent du store `articles` (métadonnées
+  // évincées) n'y figure pas → son contenu est aussi évincé.
+  const inCorpus = new Set<string>();
+  for (const a of await articlesStore.getAll()) {
+    if (!a.read || a.saved) inCorpus.add(a.id);
+  }
+
+  const kept: string[] = [];
+  let cursor = await contentStore.openCursor();
+  while (cursor) {
+    if (inCorpus.has(cursor.primaryKey)) {
+      if (cursor.value.html !== null) kept.push(cursor.value.html);
+    } else {
+      // Read non-Saved (ou métadonnées disparues) → on évince le HTML.
+      await cursor.delete();
+    }
+    cursor = await cursor.continue();
+  }
+
+  await tx.done;
+  return kept;
+}

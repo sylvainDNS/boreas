@@ -14,6 +14,13 @@ export const itemBase =
 export const itemActive = "bg-surface-2 font-medium text-accent";
 
 /**
+ * Message commun des ops Feeds/Folders **online-only** désactivées hors-ligne
+ * (#81, ADR 0018) : ajout/déplacement/renommage/suppression/désabonnement
+ * exigent le réseau. Posé en `title` (info-bulle) sur les déclencheurs désactivés.
+ */
+export const OFFLINE_OP_TITLE = "Indisponible hors-ligne";
+
+/**
  * Type des draggables de la Sidebar (drag-n-drop des Feeds). Les droppables
  * (dossiers + zone « sans dossier ») n'acceptent que ce type, ce qui isole le
  * drag des Feeds de tout autre usage futur de dnd-kit.

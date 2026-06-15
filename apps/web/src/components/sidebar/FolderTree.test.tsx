@@ -36,6 +36,7 @@ function renderTree(
     folders: Folder[];
     feeds: Feed[];
     onRequestDialog: (d: SidebarDialog) => void;
+    online: boolean;
   }> = {},
 ) {
   stubApi(mockedFetch, {});
@@ -53,6 +54,7 @@ function renderTree(
       unreadByFolder={new Map([["tech", 3]])}
       onRequestDialog={onRequestDialog}
       onMove={vi.fn()}
+      online={over.online ?? true}
     />,
   );
   return { ...result, onRequestDialog };
@@ -116,5 +118,24 @@ describe("FolderTree", () => {
     expect(
       await screen.findByText("Aucun flux pour l'instant."),
     ).toBeInTheDocument();
+  });
+
+  it("hors-ligne : désactive les « + » (nouveau dossier / ajouter un flux)", async () => {
+    renderTree({ online: false });
+    expect(
+      await screen.findByRole("button", { name: "Nouveau dossier" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Ajouter un flux" }),
+    ).toBeDisabled();
+  });
+
+  it("hors-ligne : désactive renommer/supprimer un dossier", async () => {
+    const { user } = renderTree({ online: false });
+    await user.click(
+      await screen.findByRole("button", { name: /Actions pour Tech/ }),
+    );
+    expect(screen.getByRole("menuitem", { name: "Renommer…" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Supprimer" })).toBeDisabled();
   });
 });

@@ -43,6 +43,7 @@ function renderRow(
     onRequestDialog: (d: SidebarDialog) => void;
     onMove: (id: string, folderId: string | null) => void;
     unread: number;
+    online: boolean;
   }> = {},
 ) {
   stubApi(mockedFetch, {});
@@ -56,6 +57,7 @@ function renderRow(
       folders={folders}
       onRequestDialog={onRequestDialog}
       onMove={onMove}
+      online={over.online ?? true}
     />,
     { initialPath: `/feeds/${feed.id}` },
   );
@@ -124,5 +126,18 @@ describe("FeedRow", () => {
     expect(
       screen.getByRole("menuitem", { name: /Aucun dossier/ }),
     ).toBeDisabled();
+  });
+
+  it("hors-ligne : désactive toutes les ops du menu (renommer/déplacer/désabonner/supprimer)", async () => {
+    const { user } = renderRow({ online: false });
+    await user.click(
+      await screen.findByRole("button", { name: /Actions pour/ }),
+    );
+    expect(screen.getByRole("menuitem", { name: "Renommer…" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Tech/ })).toBeDisabled();
+    expect(
+      screen.getByRole("menuitem", { name: "Se désabonner" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Supprimer…" })).toBeDisabled();
   });
 });

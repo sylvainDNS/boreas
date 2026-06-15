@@ -5,3 +5,12 @@ HMAC_SECRET=dev-secret-not-for-prod
 ENVIRONMENT=development
 APP_BASE_URL=http://localhost:5173
 EMAIL_FROM=noreply@boreas.sylvaindenyse.me
+
+# Web Push VAPID (#79) — paire P-256 propre au dev local. NE PAS committer de
+# vraie clé ici (GitGuardian la signalerait). Générer la paire et la coller dans
+# .dev.vars (gitignoré) ; pour la prod, VAPID_PRIVATE_KEY va dans un secret Worker
+# (`wrangler secret put`) et la MÊME clé publique alimente VITE_VAPID_PUBLIC_KEY.
+#   node -e 'crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]).then(async p=>{const b=x=>Buffer.from(new Uint8Array(x)).toString("base64url");console.log("PRIVATE="+b(await crypto.subtle.exportKey("pkcs8",p.privateKey)));console.log("PUBLIC="+b(await crypto.subtle.exportKey("raw",p.publicKey)))})'
+VAPID_PRIVATE_KEY=
+VAPID_PUBLIC_KEY=
+VAPID_SUBJECT=mailto:dev@boreas.sylvaindenyse.me

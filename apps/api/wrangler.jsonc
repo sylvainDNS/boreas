@@ -22,7 +22,14 @@
   "vars": {
     "EMAIL_FROM": "noreply@boreas.sylvaindenyse.me",
     "APP_BASE_URL": "https://boreas.sylvaindenyse.me",
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "production",
+    // Web Push (#79). VAPID_PRIVATE_KEY est un secret Worker (posé via
+    // `wrangler secret put`). VAPID_PUBLIC_KEY (point P-256 brut base64url) et
+    // VAPID_SUBJECT ne sont pas secrets. La MÊME clé publique alimente
+    // VITE_VAPID_PUBLIC_KEY au build du front (cf. .github/workflows/ci.yml).
+    // En local, .dev.vars surcharge avec une paire jetable de dev.
+    "VAPID_PUBLIC_KEY": "BMgR-UrYVwD2XDYIbhnADIml3lqInfFdqlJt8GC09p2BlQ5IYrIH-M66sffxm9f3qCbzeknsYzBqC4aSD8Wm1IM",
+    "VAPID_SUBJECT": "mailto:contact@boreas.sylvaindenyse.me"
   },
   "d1_databases": [
     {

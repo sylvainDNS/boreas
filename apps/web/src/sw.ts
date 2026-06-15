@@ -8,6 +8,7 @@ import {
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { CacheFirst } from "workbox-strategies";
+import { buildNotification } from "./lib/push";
 import { PERIODIC_SYNC_TAG } from "./lib/pwa";
 import { IMAGE_CACHE } from "./lib/sync/image-cache";
 
@@ -119,5 +120,50 @@ self.addEventListener("periodicsync", (event) => {
           client.postMessage({ type: "PERIODIC_SYNC" });
         }
       }),
+  );
+});
+
+// 6. Web Push (#79, ADR 0018) : à la réception d'un push, on affiche une
+//    notification. Le payload (JSON émis par le serveur) est traduit par
+//    `buildNotification` (pure, testée) ; un payload absent/illisible retombe sur
+//    un repli plutôt que de planter — Chrome exige une notification VISIBLE pour
+//    chaque push (sinon il révoque l'abonnement). Pour CE ticket, c'est la
+//    notification de test (push de bienvenue) ; le téléchargement préalable du
+//    contenu (delta + HTML + images) avant l'affichage est du ressort de #80.
+self.addEventListener("push", (event) => {
+  let payload: unknown = null;
+  try {
+    payload = event.data?.json() ?? null;
+  } catch {
+    payload = null;
+  }
+  const { title, options } = buildNotification(
+    payload as Parameters<typeof buildNotification>[0],
+  );
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// 7. Tap sur une notification (#79) : on referme, puis on **focalise** un onglet
+//    déjà ouvert (en le menant à l'URL cible si possible) ou on en **ouvre** un.
+//    L'URL vit dans `data.url` (posée par `buildNotification`). Le deep-link fin
+//    par Feed (`/feeds/:id`) est exploité par #80 ; ici l'URL par défaut est `/`.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data as { url?: string } | null;
+  const url = data?.url ?? "/";
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      const client = clients[0];
+      if (client) {
+        if (url !== "/") await client.navigate(url).catch(() => undefined);
+        await client.focus();
+        return;
+      }
+      await self.clients.openWindow(url);
+    })(),
   );
 });

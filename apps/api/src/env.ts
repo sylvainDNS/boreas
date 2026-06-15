@@ -18,4 +18,10 @@ export interface Env {
   APP_BASE_URL: string;
   /** "production" en prod ; toute autre valeur mocke l'envoi d'e-mail. */
   ENVIRONMENT: string;
+  /** Clé privée VAPID (PKCS#8 base64url) — secret Worker. Signe le JWT Web Push (#79). */
+  VAPID_PRIVATE_KEY: string;
+  /** Clé publique VAPID (point P-256 brut, base64url) — var. Paramètre `k=` du header VAPID (#79). */
+  VAPID_PUBLIC_KEY: string;
+  /** Sujet VAPID (`mailto:` ou URL de contact) — var (#79). */
+  VAPID_SUBJECT: string;
 }

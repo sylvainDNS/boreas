@@ -14,6 +14,7 @@ export {
   feeds,
   folders,
   getDb,
+  pushSubscriptions,
   settings,
   tombstones,
 } from "./db/index";

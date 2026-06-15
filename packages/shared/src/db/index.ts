@@ -6,6 +6,7 @@ export {
   authTokens,
   feeds,
   folders,
+  pushSubscriptions,
   settings,
   tombstones,
 } from "./schema";

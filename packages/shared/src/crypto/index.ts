@@ -13,3 +13,15 @@ export {
   verifyMagicToken,
   verifySession,
 } from "./tokens";
+export type {
+  SendResult,
+  VapidKeys,
+  WebPushRequest,
+  WebPushSubscription,
+} from "./web-push";
+export {
+  buildWebPushRequest,
+  createVapidJwt,
+  encryptPayload,
+  sendWebPush,
+} from "./web-push";

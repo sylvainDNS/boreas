@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { OpmlImportDialog } from "../components/OpmlImportDialog";
+import { PushToggle } from "../components/PushToggle";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Button } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
@@ -126,6 +127,12 @@ export function SettingsView() {
             hint="Sur connexion mobile, ne télécharge pas le contenu des articles ni les images. Les titres et l'état de lecture se synchronisent toujours. Réglage propre à cet appareil."
           >
             <WifiOnlyToggle />
+          </Row>
+          <Row
+            label="Notifications push"
+            hint="Recevez une notification dès qu'un article est prêt à lire. Activer demande l'autorisation du navigateur. Réglage propre à cet appareil."
+          >
+            <PushToggle />
           </Row>
           <Row
             label="Intervalle de rafraîchissement"

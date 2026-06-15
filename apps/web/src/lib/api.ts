@@ -40,5 +40,7 @@ export async function apiFetch<T>(
       .catch(() => null);
     throw new ApiError(res.status, code);
   }
+  // 204 No Content (ex. désabonnement push, #79) : pas de corps à parser.
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

@@ -13,8 +13,8 @@ export default defineConfig({
     // PWA (#76, ADR 0018) en mode `injectManifest` : Workbox gère le precache du
     // shell + le versioning, on écrit le SW custom (`src/sw.ts`) où est injecté
     // `self.__WB_MANIFEST`. Le SW assure le boot hors-ligne (precache + fallback
-    // de navigation) ; les points d'extension #77 (images) / #79 (push) y sont
-    // commentés.
+    // de navigation), les images hors-ligne (#77) et le Web Push (#79 : handlers
+    // `push`/`notificationclick`).
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",

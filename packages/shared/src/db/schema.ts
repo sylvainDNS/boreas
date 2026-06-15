@@ -241,3 +241,24 @@ export const tombstones = sqliteTable(
     ),
   ],
 );
+
+/**
+ * Abonnements Web Push (#79, ADR 0018). App **mono-utilisateur, multi-appareils** :
+ * une ligne par appareil abonné, clé par l'`endpoint` du service push (FCM,
+ * Mozilla…). `p256dh`/`auth` sont les clés publiques du client, servant à
+ * chiffrer le payload pour cet abonné (aes128gcm, RFC 8291). Pas de `user_id`
+ * (propriétaire unique, cf. sessions `sub:"owner"`) ni d'`updated_at` (les
+ * abonnements ne sont pas répliqués hors-ligne). Réabonner le même endpoint est
+ * un upsert : les clés peuvent tourner côté navigateur.
+ */
+export const pushSubscriptions = sqliteTable("push_subscriptions", {
+  /** URL du service push : identité de l'abonnement. */
+  endpoint: text("endpoint").primaryKey(),
+  /** Clé publique P-256 du client (base64url). */
+  p256dh: text("p256dh").notNull(),
+  /** Secret d'authentification du client (base64url). */
+  auth: text("auth").notNull(),
+  created_at: text("created_at")
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),
+});

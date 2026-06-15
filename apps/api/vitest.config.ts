@@ -19,6 +19,18 @@ export default defineConfig({
     silenceSourcemapWarnings(),
     cloudflareTest(async () => {
       const migrations = await readD1Migrations(migrationsPath);
+      // Paire VAPID **générée à la volée** pour les tests #79 (jamais commitée,
+      // sinon GitGuardian la signale comme clé privée) : signe le JWT et chiffre
+      // le push de test ; le fetch sortant est mocké dans les tests.
+      const vapidPair = (await crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-256" },
+        true,
+        ["sign", "verify"],
+      )) as CryptoKeyPair;
+      const exportB64url = async (key: CryptoKey, format: "pkcs8" | "raw") =>
+        Buffer.from(
+          (await crypto.subtle.exportKey(format, key)) as ArrayBuffer,
+        ).toString("base64url");
       return {
         main: "./src/index.ts",
         miniflare: {
@@ -36,6 +48,12 @@ export default defineConfig({
             EMAIL_FROM: "noreply@boreas.sylvaindenyse.me",
             APP_BASE_URL: "http://localhost:5173",
             ENVIRONMENT: "development",
+            VAPID_PRIVATE_KEY: await exportB64url(
+              vapidPair.privateKey,
+              "pkcs8",
+            ),
+            VAPID_PUBLIC_KEY: await exportB64url(vapidPair.publicKey, "raw"),
+            VAPID_SUBJECT: "mailto:test@boreas.test",
           },
         },
       };

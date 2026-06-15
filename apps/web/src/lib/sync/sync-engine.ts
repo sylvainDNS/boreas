@@ -2,6 +2,7 @@ import type {
   ArticleContentResponse,
   SyncResponse,
 } from "@boreas/api-contracts";
+import { imageUrlsFromHtml, warmImageCache } from "./image-cache";
 import { flushOutbox, type PushOutbox } from "./outbox-store";
 import {
   applyDelta,
@@ -45,6 +46,13 @@ const CONTENT_BATCH_SIZE = 50;
  * **absents** du store (pas de re-téléchargement), par lots bornés. Best-effort :
  * une erreur réseau (hors-ligne) est **avalée** — la sync (delta déjà appliqué)
  * ne doit pas échouer ; le contenu sera rapatrié à une passe ultérieure.
+ *
+ * **Pré-chauffage des images (#77, ADR 0018)** : pour chaque HTML fraîchement
+ * téléchargé, on extrait ses `src` proxifiés (`/api/img…`) et on les pré-chauffe
+ * dans le Cache Storage du SW (cache-first), de sorte qu'ouvrir l'article
+ * hors-ligne affiche **ses images**. C'est branché ICI — donc uniquement pour les
+ * articles dont le HTML vient d'être rapatrié (corpus non-lus ∪ Saved), jamais
+ * pour ceux hors corpus. Aussi best-effort : `warmImageCache` avale ses échecs.
  */
 async function prefetchContent(
   db: ReplicaDb,
@@ -53,13 +61,24 @@ async function prefetchContent(
   try {
     const corpus = await unreadOrSavedIds(db);
     const missing = await missingContentIds(db, corpus);
+    // (1) On persiste d'abord **tout** le HTML (donnée critique de lecture offline),
+    // en accumulant au passage les `src` d'images proxifiées. Le pré-chauffage des
+    // images — best-effort et secondaire — ne doit PAS s'intercaler entre les lots
+    // de contenu : sinon fermer l'onglet en cours de chauffage laisserait du HTML
+    // lisible non sauvegardé, alors que des images l'auraient été.
+    const imageUrls = new Set<string>();
     for (let i = 0; i < missing.length; i += CONTENT_BATCH_SIZE) {
       const batch = missing.slice(i, i + CONTENT_BATCH_SIZE);
       const items = await fetchContent(batch);
       for (const item of items) {
         await writeArticleContent(db, item.id, item.html);
+        // Pas de réécriture du `src` : on ne fait que collecter les URLs à chauffer.
+        for (const url of imageUrlsFromHtml(item.html)) imageUrls.add(url);
       }
     }
+    // (2) Contenu intégralement persisté → pré-chauffage du Cache Storage des images
+    // (best-effort, offline → skip), une seule passe dédoublonnée sur tout le corpus.
+    await warmImageCache([...imageUrls]);
   } catch {
     // Hors-ligne / erreur réseau : on garde le delta déjà appliqué et on
     // re-tentera le pré-téléchargement à la prochaine passe (focus/online).

@@ -301,6 +301,40 @@ describe("sync-engine — pré-téléchargement du contenu (#75)", () => {
     expect(await readArticleContent(db, "u1")).toBeUndefined();
   });
 
+  it("pré-chauffe les images du HTML téléchargé dans le Cache Storage (#77)", async () => {
+    const added: string[] = [];
+    const fakeCache = {
+      match: vi.fn(async () => undefined),
+      add: vi.fn(async (url: string) => {
+        added.push(url);
+      }),
+    };
+    const original = (globalThis as { caches?: unknown }).caches;
+    (globalThis as { caches?: unknown }).caches = {
+      open: vi.fn(async () => fakeCache),
+    };
+
+    const pull = vi.fn(async () =>
+      emptyPage({
+        upserts: { articles: [art("u1", false)], feeds: [], folders: [] },
+        cursor: 100,
+      }),
+    );
+    const fetchContent: FetchContent = vi.fn(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        html: `<p>texte</p><img src="/api/img?u=${id}&sig=zzz"><img src="https://cdn/x.png">`,
+      })),
+    );
+
+    await runSync(db, pull, undefined, fetchContent);
+
+    // Seule l'image proxifiée est pré-chauffée (pas l'image externe non /api/img).
+    expect(added).toEqual(["/api/img?u=u1&sig=zzz"]);
+
+    (globalThis as { caches?: unknown }).caches = original;
+  });
+
   it("borne le batch (lots successifs) pour un gros corpus", async () => {
     const many = Array.from({ length: 70 }, (_, i) => art(`u${i}`, false));
     const pull = vi.fn(async () =>

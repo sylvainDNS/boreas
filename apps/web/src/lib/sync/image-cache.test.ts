@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IMAGE_CACHE, imageUrlsFromHtml, warmImageCache } from "./image-cache";
+import {
+  IMAGE_CACHE,
+  imageUrlsFromHtml,
+  reconcileImageCache,
+  warmImageCache,
+} from "./image-cache";
 
 describe("image-cache — imageUrlsFromHtml", () => {
   it("extrait les src des images proxy /api/img", () => {
@@ -120,5 +125,89 @@ describe("image-cache — warmImageCache", () => {
     await warmImageCache([]);
     expect(openName()).toBeUndefined();
     restore();
+  });
+});
+
+// --- reconcileImageCache : GC du Cache Storage par comptage de références (#81) ---
+
+interface MockReconcileCache {
+  keysUrls: string[];
+  deleted: string[];
+}
+
+/** Faux `caches` dont le cache expose `keys()` (Request) et `delete(Request)`. */
+function mockCachesForReconcile(cachedUrls: string[]): {
+  state: MockReconcileCache;
+  restore: () => void;
+} {
+  const state: MockReconcileCache = { keysUrls: cachedUrls, deleted: [] };
+  const fakeCache = {
+    keys: vi.fn(async () =>
+      // Clés = Request d'URL **absolue** (comme le vrai Cache Storage).
+      state.keysUrls.map((u) => new Request(`https://app.test${u}`)),
+    ),
+    delete: vi.fn(async (req: Request) => {
+      const url = new URL(req.url);
+      state.deleted.push(`${url.pathname}${url.search}`);
+      return true;
+    }),
+  };
+  const original = (globalThis as { caches?: unknown }).caches;
+  (globalThis as { caches?: unknown }).caches = {
+    open: vi.fn(async () => fakeCache),
+  };
+  return {
+    state,
+    restore: () => {
+      (globalThis as { caches?: unknown }).caches = original;
+    },
+  };
+}
+
+describe("image-cache — reconcileImageCache", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("supprime les images non référencées par aucun contenu restant", async () => {
+    const { state, restore } = mockCachesForReconcile([
+      "/api/img?u=A&sig=x",
+      "/api/img?u=B&sig=y",
+      "/api/img?u=C&sig=z",
+    ]);
+    // Seules A et C restent référencées (B a quitté le corpus → évincée).
+    await reconcileImageCache(["/api/img?u=A&sig=x", "/api/img?u=C&sig=z"]);
+    expect(state.deleted).toEqual(["/api/img?u=B&sig=y"]);
+    restore();
+  });
+
+  it("conserve une image encore référencée par au moins un contenu (comptage par union)", async () => {
+    const { state, restore } = mockCachesForReconcile(["/api/img?u=A&sig=x"]);
+    // A est référencée → on ne supprime rien.
+    await reconcileImageCache(["/api/img?u=A&sig=x"]);
+    expect(state.deleted).toEqual([]);
+    restore();
+  });
+
+  it("évince TOUT quand plus aucun contenu ne reste (référencées = ∅)", async () => {
+    const { state, restore } = mockCachesForReconcile([
+      "/api/img?u=A&sig=x",
+      "/api/img?u=B&sig=y",
+    ]);
+    await reconcileImageCache([]);
+    expect(state.deleted.sort()).toEqual([
+      "/api/img?u=A&sig=x",
+      "/api/img?u=B&sig=y",
+    ]);
+    restore();
+  });
+
+  it("no-op si Cache Storage indisponible (pas de caches)", async () => {
+    const original = (globalThis as { caches?: unknown }).caches;
+    (globalThis as { caches?: unknown }).caches = undefined;
+    await expect(
+      reconcileImageCache(["/api/img?u=A"]),
+    ).resolves.toBeUndefined();
+    (globalThis as { caches?: unknown }).caches = original;
   });
 });

@@ -10,6 +10,7 @@ import {
   type FeedDragData,
   itemActive,
   itemBase,
+  OFFLINE_OP_TITLE,
   type SidebarDialog,
 } from "./sidebar-model";
 
@@ -26,6 +27,7 @@ export function FeedRow({
   onRequestDialog,
   onMove,
   onNavigate,
+  online,
 }: {
   feed: Feed;
   unread: number;
@@ -33,6 +35,8 @@ export function FeedRow({
   onRequestDialog: (dialog: SidebarDialog) => void;
   onMove: (id: string, folderId: string | null) => void;
   onNavigate?: () => void;
+  /** Connexion réseau : déplacement (drag + menu) et actions cycle de vie gatés. */
+  online: boolean;
 }) {
   const matchRoute = useMatchRoute();
   const isActive = Boolean(
@@ -54,6 +58,9 @@ export function FeedRow({
     id: feed.id,
     type: FEED_DRAG_TYPE,
     data: dragData,
+    // Déplacement = op online-only (ADR 0018) : hors-ligne, le drag est désactivé
+    // (le menu « Déplacer vers » l'est aussi, et `onDragEnd` no-op en secours).
+    disabled: !online,
   });
 
   return (
@@ -83,6 +90,8 @@ export function FeedRow({
             <button
               type="button"
               role="menuitem"
+              disabled={!online}
+              title={online ? undefined : OFFLINE_OP_TITLE}
               className={menuItemClass}
               onClick={() => {
                 close();
@@ -96,7 +105,8 @@ export function FeedRow({
               type="button"
               role="menuitem"
               className={menuItemClass}
-              disabled={feed.folderId == null}
+              disabled={!online || feed.folderId == null}
+              title={online ? undefined : OFFLINE_OP_TITLE}
               onClick={() => {
                 close();
                 onMove(feed.id, null);
@@ -110,7 +120,8 @@ export function FeedRow({
                 type="button"
                 role="menuitem"
                 className={menuItemClass}
-                disabled={feed.folderId === folder.id}
+                disabled={!online || feed.folderId === folder.id}
+                title={online ? undefined : OFFLINE_OP_TITLE}
                 onClick={() => {
                   close();
                   onMove(feed.id, folder.id);
@@ -124,6 +135,8 @@ export function FeedRow({
             <button
               type="button"
               role="menuitem"
+              disabled={!online}
+              title={online ? undefined : OFFLINE_OP_TITLE}
               className={menuItemClass}
               onClick={() => {
                 close();
@@ -135,6 +148,8 @@ export function FeedRow({
             <button
               type="button"
               role="menuitem"
+              disabled={!online}
+              title={online ? undefined : OFFLINE_OP_TITLE}
               className={`${menuItemClass} text-danger`}
               onClick={() => {
                 close();

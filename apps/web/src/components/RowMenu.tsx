@@ -1,8 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-/** Classe partagée des entrées de menu (boutons pleine largeur). */
+/** Classe partagée des entrées de menu (boutons pleine largeur). Les entrées
+ *  `disabled` (ops online-only hors-ligne, #81) sont atténuées et non cliquables. */
 export const menuItemClass =
-  "flex w-full items-center gap-2 rounded-card px-3 py-2 text-left text-sm text-text transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2";
+  "flex w-full items-center gap-2 rounded-card px-3 py-2 text-left text-sm text-text transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
 /** En-tête de groupe à l'intérieur d'un menu (libellé non cliquable). */
 export function MenuLabel({ children }: { children: ReactNode }) {

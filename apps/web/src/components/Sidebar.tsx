@@ -12,6 +12,8 @@ import { articleCountsQueryOptions } from "../lib/articles";
 import { AUTH_QUERY_KEY, logout } from "../lib/auth";
 import { feedsQueryOptions } from "../lib/feeds";
 import { foldersQueryOptions } from "../lib/folders";
+import { useOnlineStatus } from "../lib/use-online-status";
+import { OfflineStatus } from "./OfflineStatus";
 import { FolderTree } from "./sidebar/FolderTree";
 import { SidebarDialogs } from "./sidebar/SidebarDialogs";
 import { SidebarSearch } from "./sidebar/SidebarSearch";
@@ -73,6 +75,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   // sinon vide. `strict: false` : la sidebar est montée hors d'une route précise.
   const { q: searchQuery } = useSearch({ strict: false }) as { q?: string };
 
+  // Ops Feeds/Folders **online-only** (ADR 0018) : ajouter/déplacer/renommer/
+  // supprimer/désabonner exigent le réseau. Hors-ligne, on les désactive
+  // visiblement (cf. `FolderTree`/`FeedRow`/`SidebarDialogs` + drag-drop ci-dessous).
+  const online = useOnlineStatus();
+
   const lifecycle = useFeedLifecycle();
 
   const unreadByFeed = useMemo(
@@ -102,7 +109,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   // Fin de drag : un Feed (source) lâché sur un dossier ou la zone « sans
   // dossier » (target). On ignore l'annulation et les drops hors cible, et on
   // court-circuite un drop sur le dossier courant (no-op). `move` est optimiste.
+  // **Online-only** (ADR 0018) : hors-ligne, on no-op (le drag est aussi
+  // désactivé côté `FeedRow`, ceci est une double sécurité).
   function handleDragEnd(event: DragEndEvent) {
+    if (!online) return;
     const { source, target } = event.operation;
     if (event.canceled || !source || !target) return;
     const targetFolderId = resolveDropTarget(String(target.id));
@@ -152,6 +162,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             onRequestDialog={setDialog}
             onMove={lifecycle.move}
             onNavigate={onNavigate}
+            online={online}
           />
         </nav>
 
@@ -175,7 +186,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         onClose={() => setDialog(null)}
         unsubscribe={lifecycle.unsubscribe}
         remove={lifecycle.remove}
+        online={online}
       />
+
+      {/* Indicateur de connexion + badge « actions en attente » (#81). */}
+      <OfflineStatus />
 
       <div className="space-y-2 border-border border-t p-3">
         <Link

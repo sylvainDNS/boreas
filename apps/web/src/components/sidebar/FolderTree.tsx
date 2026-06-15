@@ -10,6 +10,7 @@ import {
   FEED_DRAG_TYPE,
   itemActive,
   itemBase,
+  OFFLINE_OP_TITLE,
   type SidebarDialog,
   UNFILED_DROPPABLE_ID,
 } from "./sidebar-model";
@@ -35,6 +36,7 @@ export function FolderTree({
   onRequestDialog,
   onMove,
   onNavigate,
+  online,
 }: {
   folders: readonly Folder[];
   feedsByFolder: ReadonlyMap<string, Feed[]>;
@@ -46,6 +48,8 @@ export function FolderTree({
   onRequestDialog: (dialog: SidebarDialog) => void;
   onMove: (id: string, folderId: string | null) => void;
   onNavigate?: () => void;
+  /** Connexion réseau : les ops Feeds/Folders online-only sont gatées dessus. */
+  online: boolean;
 }) {
   // Folders repliés (par défaut tous dépliés : un id présent = replié).
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -69,6 +73,7 @@ export function FolderTree({
         onRequestDialog={onRequestDialog}
         onMove={onMove}
         onNavigate={onNavigate}
+        online={online}
       />
     );
   }
@@ -84,9 +89,10 @@ export function FolderTree({
           <button
             type="button"
             onClick={() => onRequestDialog({ kind: "createFolder" })}
+            disabled={!online}
             aria-label="Nouveau dossier"
-            title="Nouveau dossier"
-            className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+            title={online ? "Nouveau dossier" : OFFLINE_OP_TITLE}
+            className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
           >
             +
           </button>
@@ -102,6 +108,7 @@ export function FolderTree({
             onRequestDialog={onRequestDialog}
             onNavigate={onNavigate}
             renderFeed={renderFeed}
+            online={online}
           />
         ))}
         {folders.length === 0 && (
@@ -118,9 +125,10 @@ export function FolderTree({
           <button
             type="button"
             onClick={() => onRequestDialog({ kind: "addFeed" })}
+            disabled={!online}
             aria-label="Ajouter un flux"
-            title="Ajouter un flux"
-            className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+            title={online ? "Ajouter un flux" : OFFLINE_OP_TITLE}
+            className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
           >
             +
           </button>
@@ -132,9 +140,11 @@ export function FolderTree({
             <button
               type="button"
               onClick={() => onRequestDialog({ kind: "addFeed" })}
-              className="mt-1 text-accent text-sm underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+              disabled={!online}
+              title={online ? undefined : OFFLINE_OP_TITLE}
+              className="mt-1 text-accent text-sm underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:text-muted disabled:no-underline"
             >
-              Ajouter un flux
+              {online ? "Ajouter un flux" : "Ajouter un flux (hors-ligne)"}
             </button>
           </div>
         )}
@@ -158,6 +168,7 @@ function FolderDroppable({
   onRequestDialog,
   onNavigate,
   renderFeed,
+  online,
 }: {
   folder: Folder;
   feeds: readonly Feed[];
@@ -167,6 +178,7 @@ function FolderDroppable({
   onRequestDialog: (dialog: SidebarDialog) => void;
   onNavigate?: () => void;
   renderFeed: (feed: Feed) => ReactNode;
+  online: boolean;
 }) {
   const matchRoute = useMatchRoute();
   const isActive = Boolean(
@@ -208,6 +220,8 @@ function FolderDroppable({
               <button
                 type="button"
                 role="menuitem"
+                disabled={!online}
+                title={online ? undefined : OFFLINE_OP_TITLE}
                 className={menuItemClass}
                 onClick={() => {
                   close();
@@ -219,6 +233,8 @@ function FolderDroppable({
               <button
                 type="button"
                 role="menuitem"
+                disabled={!online}
+                title={online ? undefined : OFFLINE_OP_TITLE}
                 className={`${menuItemClass} text-danger`}
                 onClick={() => {
                   close();

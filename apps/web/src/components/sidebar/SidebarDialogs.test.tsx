@@ -17,8 +17,10 @@ import { useFeedLifecycle } from "./use-feed-lifecycle";
  */
 function SidebarDialogsHarness({
   initialDialog,
+  online = true,
 }: {
   initialDialog: SidebarDialog;
+  online?: boolean;
 }) {
   const [dialog, setDialog] = useState<SidebarDialog | null>(initialDialog);
   const { unsubscribe, remove } = useFeedLifecycle();
@@ -28,6 +30,7 @@ function SidebarDialogsHarness({
       onClose={() => setDialog(null)}
       unsubscribe={unsubscribe}
       remove={remove}
+      online={online}
     />
   );
 }

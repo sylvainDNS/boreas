@@ -25,11 +25,20 @@ export function SidebarDialogs({
   onClose,
   unsubscribe,
   remove,
+  online,
 }: {
   dialog: SidebarDialog | null;
   onClose: () => void;
   unsubscribe: FeedLifecycle["unsubscribe"];
   remove: FeedLifecycle["remove"];
+  /**
+   * Connexion réseau. Les déclencheurs de ces dialogues (online-only, ADR 0018)
+   * sont déjà désactivés hors-ligne dans la Sidebar ; cette garde couvre le cas
+   * d'une connexion **perdue dialogue ouvert** : on désactive alors les
+   * confirmations destructives (suppression/désabonnement de Feed) qui ne
+   * passeraient pas par l'optimistic-update et échoueraient au réseau.
+   */
+  online: boolean;
 }) {
   const queryClient = useQueryClient();
   const createFolder = useMutation(createFolderMutationOptions(queryClient));
@@ -136,7 +145,7 @@ export function SidebarDialogs({
           </Button>
           <Button
             variant="danger"
-            disabled={deleteFolder.isPending}
+            disabled={deleteFolder.isPending || !online}
             onClick={() => {
               if (dialog?.kind !== "deleteFolder") return;
               deleteFolder.mutate(dialog.folder.id, { onSuccess: close });
@@ -174,7 +183,7 @@ export function SidebarDialogs({
           </Button>
           <Button
             variant="primary"
-            disabled={unsubscribe.isPending}
+            disabled={unsubscribe.isPending || !online}
             onClick={() => {
               if (dialog?.kind !== "unsubscribeFeed") return;
               unsubscribe.mutate(dialog.feed, { onSuccess: close });
@@ -212,7 +221,7 @@ export function SidebarDialogs({
           </Button>
           <Button
             variant="danger"
-            disabled={remove.isPending}
+            disabled={remove.isPending || !online}
             onClick={() => {
               if (dialog?.kind !== "deleteFeed") return;
               remove.mutate(dialog.feed, { onSuccess: close });

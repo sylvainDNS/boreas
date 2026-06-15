@@ -8,6 +8,7 @@ import {
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { CacheFirst } from "workbox-strategies";
+import { PERIODIC_SYNC_TAG } from "./lib/pwa";
 import { IMAGE_CACHE } from "./lib/sync/image-cache";
 
 /**
@@ -89,4 +90,34 @@ self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
   }
+});
+
+// 5. Periodic Background Sync (#81, ADR 0018) — **best-effort, filet de secours**.
+//    Enregistré page-context (`register-sw.tsx`, gardé support+permission). Quand
+//    Chrome réveille le SW pour notre tag, on **réveille les clients ouverts**
+//    (`postMessage`) plutôt que de **dupliquer le moteur de sync** ici : la sync
+//    complète (push outbox → pull delta → contenu/images, IndexedDB) vit en
+//    contexte page (`syncReplica`/`runSync`) et ne doit exister qu'à un seul
+//    endroit (ADR 0018 : « le SW ne duplique aucune logique de données »).
+//
+//    **Limites assumées et documentées** :
+//      - si aucun client n'est ouvert, ce handler ne synchronise rien de neuf
+//        (le pull complet reste page-context à la réouverture) — le periodicsync
+//        ne sert qu'à rafraîchir un onglet déjà ouvert au réveil ;
+//      - **iOS** ne supporte pas du tout cette API (jamais déclenché) ;
+//      - la fréquence réelle est à la discrétion du navigateur (gating Chrome).
+self.addEventListener("periodicsync", (event) => {
+  const periodicEvent = event as ExtendableEvent & { tag?: string };
+  // Tag importé de `lib/pwa` (source unique) : il DOIT coïncider avec celui passé
+  // à `periodicSync.register` côté page, sinon ce handler ne matcherait jamais.
+  if (periodicEvent.tag !== PERIODIC_SYNC_TAG) return;
+  periodicEvent.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        for (const client of clients) {
+          client.postMessage({ type: "PERIODIC_SYNC" });
+        }
+      }),
+  );
 });

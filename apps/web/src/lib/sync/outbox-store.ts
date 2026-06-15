@@ -35,6 +35,15 @@ export async function readOutbox(db: ReplicaDb): Promise<OutboxEntry[]> {
   return db.getAll("outbox");
 }
 
+/**
+ * Nombre d'entrées en attente dans l'outbox (#81, badge « actions en attente »).
+ * Compte sans charger les valeurs (`count()`), pour un affichage léger rafraîchi
+ * après chaque mutation de lecture et chaque passe de sync (qui flushe l'outbox).
+ */
+export async function countOutbox(db: ReplicaDb): Promise<number> {
+  return db.count("outbox");
+}
+
 /** Supprime (ack) une entrée de l'outbox par son `seq`. */
 export async function deleteOutboxEntry(
   db: ReplicaDb,

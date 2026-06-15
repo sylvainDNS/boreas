@@ -2,11 +2,17 @@ import type {
   ArticleContentResponse,
   SyncResponse,
 } from "@boreas/api-contracts";
-import { imageUrlsFromHtml, warmImageCache } from "./image-cache";
-import { flushOutbox, type PushOutbox } from "./outbox-store";
+import { shouldSkipHeavyContent } from "../wifi-only";
+import {
+  imageUrlsFromHtml,
+  reconcileImageCache,
+  warmImageCache,
+} from "./image-cache";
+import { countOutbox, flushOutbox, type PushOutbox } from "./outbox-store";
 import {
   applyDelta,
   clearReplica,
+  garbageCollectContent,
   missingContentIds,
   type ReplicaDb,
   readSyncCursor,
@@ -59,6 +65,11 @@ async function prefetchContent(
   fetchContent: FetchContent,
 ): Promise<void> {
   try {
+    // Gating Wi-Fi-only (#81) : sur connexion mesurée avec le réglage ON, on
+    // **saute le contenu lourd** (HTML + images). Le delta (métadonnées) a déjà
+    // été appliqué en amont dans `runSync` — il n'est jamais gaté ici. Best-effort.
+    if (shouldSkipHeavyContent()) return;
+
     const corpus = await unreadOrSavedIds(db);
     const missing = await missingContentIds(db, corpus);
     // (1) On persiste d'abord **tout** le HTML (donnée critique de lecture offline),
@@ -101,6 +112,29 @@ const pushRequired: PushOutbox = () => {
 };
 
 /**
+ * **Passe de GC** (#81, ADR 0018) — exécutée après application du delta, avant le
+ * pré-téléchargement : évince le HTML des articles devenus **Read non-Saved**
+ * (sortis du corpus `non-lus ∪ Saved`), puis **réconcilie le Cache Storage** des
+ * images = supprime celles qui ne sont **référencées par aucun** contenu restant.
+ *
+ * `garbageCollectContent` renvoie les HTML conservés ; on en recalcule
+ * l'ensemble des `src` proxifiés via `imageUrlsFromHtml` (la même extraction que
+ * le pré-chauffage), puis `reconcileImageCache` n'évince du cache que les clés
+ * **absentes** de cet ensemble (comptage de références par l'union — une image
+ * citée par plusieurs articles survit tant qu'un seul la cite). Les **métadonnées
+ * restent** (store `articles` intact). Best-effort : `reconcileImageCache` est
+ * no-op sans `caches`. Idempotent (relancé, n'évince rien de plus).
+ */
+async function garbageCollect(db: ReplicaDb): Promise<void> {
+  const keptHtml = await garbageCollectContent(db);
+  const referenced = new Set<string>();
+  for (const html of keptHtml) {
+    for (const url of imageUrlsFromHtml(html)) referenced.add(url);
+  }
+  await reconcileImageCache(referenced);
+}
+
+/**
  * Défaut de `fetchContent` : **no-op** (à la différence de `pushRequired`). Le
  * pré-téléchargement du contenu est **best-effort** et `prefetchContent` avale déjà
  * toute erreur : omettre le transport n'entraîne donc **aucune perte de données**,
@@ -120,10 +154,15 @@ const noopFetchContent: FetchContent = async () => [];
  *     en enchaînant les pages tant que `complete` est faux ;
  *  3. application de chaque page au réplica + avancée du curseur ;
  *  4. sur `stale` (curseur périmé), wipe du réplica + resync complet depuis 0 ;
- *  5. **pré-téléchargement du contenu** (#75) : HTML des non-lus ∪ Saved manquant,
+ *  5. **GC du contenu local** (#81) : évince le HTML des articles devenus
+ *     Read-non-Saved (sortis du corpus) et réconcilie le cache d'images
+ *     (suppression des images non référencées) — métadonnées préservées ;
+ *  6. **pré-téléchargement du contenu** (#75) : HTML des non-lus ∪ Saved manquant,
  *     stocké en IndexedDB (best-effort, avalé hors-ligne) — la lecture devient
  *     possible hors-ligne sans avoir ouvert l'article. Le Read n'étant plus un
- *     effet du GET (#75), ce pré-chauffage ne passe AUCUN article en lu.
+ *     effet du GET (#75), ce pré-chauffage ne passe AUCUN article en lu. **Gaté
+ *     Wi-Fi-only** (#81) : sur connexion mesurée + réglage ON, ce contenu lourd
+ *     est sauté (les métadonnées, elles, ont déjà été synchronisées en 2-4).
  *
  * Idempotente et sûre à rejouer (déclencheurs multiples) : un échec réseau du
  * pull remonte tel quel sans avancer le curseur au-delà de la dernière page
@@ -135,6 +174,12 @@ export async function runSync(
   push: PushOutbox = pushRequired,
   fetchContent: FetchContent = noopFetchContent,
 ): Promise<void> {
+  // L'appartenance d'un article au corpus offline (non-lus ∪ Saved) ne change que
+  // sur une mutation de lecture locale (outbox en attente avant le flush) ou un
+  // delta touchant des articles ; on capture donc l'outbox AVANT le flush pour
+  // décider, plus bas, s'il vaut la peine de lancer le GC (sinon coûteux à vide).
+  const hadPendingMutations = (await countOutbox(db)) > 0;
+
   // --- (1) Push de l'outbox AVANT le pull (push-avant-pull, ADR 0018) ---
   // En cas d'échec (401/réseau), `flushOutbox` propage : on ne pull pas, et les
   // entrées non-poussées restent en outbox pour la prochaine passe.
@@ -143,6 +188,9 @@ export async function runSync(
   // --- (2-4) Pull paginé depuis le curseur courant ---
   let since = (await readSyncCursor(db)) ?? 0;
   let alreadyWiped = false;
+  // Le delta a-t-il touché des articles (upserts/tombstones) ? Sinon, aucun
+  // article n'a pu changer d'appartenance au corpus côté serveur cette passe.
+  let deltaTouchedArticles = false;
 
   while (true) {
     const page = await pull(since);
@@ -156,6 +204,10 @@ export async function runSync(
       alreadyWiped = true;
       since = 0;
       continue;
+    }
+
+    if (page.upserts.articles.length > 0 || page.tombstones.length > 0) {
+      deltaTouchedArticles = true;
     }
 
     await applyDelta(db, {
@@ -173,6 +225,23 @@ export async function runSync(
     if (page.complete) break;
   }
 
-  // --- (5) Pré-téléchargement du contenu offline (#75), best-effort ---
+  // --- (5) GC du contenu local (#81) : évince le HTML des articles passés
+  //         Read-non-Saved et réconcilie le cache d'images. Avant le
+  //         pré-téléchargement pour ne pas re-chauffer une image qu'on va évincer.
+  //         Best-effort (un échec idb n'échoue pas la passe — le delta/curseur sont
+  //         déjà persistés ; on réessaiera). On **saute** le scan O(corpus) si rien
+  //         n'a pu changer l'appartenance au corpus cette passe (onglet idle, delta
+  //         vide et aucune mutation locale en attente).
+  if (hadPendingMutations || deltaTouchedArticles) {
+    try {
+      await garbageCollect(db);
+    } catch {
+      // GC best-effort : réessayé à la prochaine passe.
+    }
+  }
+
+  // --- (6) Pré-téléchargement du contenu offline (#75), best-effort, gaté
+  //         Wi-Fi-only (#81 : le delta ci-dessus a déjà synchronisé les
+  //         métadonnées ; seul ce contenu lourd peut être sauté). ---
   await prefetchContent(db, fetchContent);
 }

@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { OpmlImportDialog } from "../components/OpmlImportDialog";
 import { PushToggle } from "../components/PushToggle";
+import { ResetReplicaButton } from "../components/ResetReplicaButton";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Button } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
@@ -181,6 +182,12 @@ export function SettingsView() {
                 </p>
               )}
             </div>
+          </Row>
+          <Row
+            label="Synchronisation"
+            hint="En cas de problème de synchronisation, efface les données locales et les retélécharge depuis le serveur."
+          >
+            <ResetReplicaButton />
           </Row>
         </div>
         {settings.isError && (

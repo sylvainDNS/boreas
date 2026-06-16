@@ -415,7 +415,9 @@ describe("<ArticleListView view />", () => {
       }),
     });
     const view = baseView([toArticle(item("a1"))]);
-    const { user, router } = renderWithApp(<ArticleListView view={view} />);
+    const { user, router, client } = renderWithApp(
+      <ArticleListView view={view} />,
+    );
 
     await user.click(
       await screen.findByRole("button", { name: "Lire : Titre a1" }),
@@ -423,6 +425,12 @@ describe("<ArticleListView view />", () => {
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ article: "a1" }),
     );
+    // Attend le contenu (import lazy d'`ArticleContent`) pour flusher sa
+    // résolution Suspense dans `act(...)`, puis le règlement de la mutation Read
+    // d'ouverture (#75) : sans quoi un re-rendu de ReaderPane traîne hors
+    // `act(...)` et React émet « update ... not wrapped in act(...) ».
+    await screen.findByText("corps");
+    await waitFor(() => expect(client.isMutating()).toBe(0));
   });
 
   it("deep-link : Article hors de la liste chargée → lecteur via la query détail", async () => {
@@ -448,6 +456,10 @@ describe("<ArticleListView view />", () => {
       await screen.findByRole("heading", { name: "Article distant" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Flux distant")).toBeInTheDocument();
+    // Attend le contenu plein (import lazy d'`ArticleContent`) : flushe sa
+    // résolution Suspense dans `act(...)` (évite le warning React) et vérifie que
+    // le deep-link affiche bien le corps via la query détail.
+    expect(await screen.findByText("contenu plein")).toBeInTheDocument();
   });
 
   it("deep-link : sauvegarder met à jour l'étoile du lecteur (cache détail patché)", async () => {
@@ -470,15 +482,25 @@ describe("<ArticleListView view />", () => {
     });
     // Article hors liste : `saved` provient du cache détail, jamais d'un cache
     // de liste — le flip doit donc patcher la query détail (régression #review).
-    const { user } = renderWithApp(<ArticleListView view={baseView()} />, {
-      initialPath: "/?article=x1",
-    });
+    const { user, client } = renderWithApp(
+      <ArticleListView view={baseView()} />,
+      {
+        initialPath: "/?article=x1",
+      },
+    );
 
+    // Attend le contenu lazy avant d'interagir : flushe la résolution Suspense
+    // d'`ArticleContent` dans `act(...)` (évite le warning React).
+    await screen.findByText("contenu plein");
     await user.click(
       await screen.findByRole("button", { name: "☆ Sauvegarder" }),
     );
     expect(
       await screen.findByRole("button", { name: "★ Sauvegardé" }),
     ).toBeInTheDocument();
+    // `findByRole` résout sur le flip optimiste (`onMutate`) ; la mutation
+    // continue de se régler ensuite (PATCH + invalidations). On l'attend pour que
+    // sa transition finale soit flushée dans `act(...)` (évite le warning React).
+    await waitFor(() => expect(client.isMutating()).toBe(0));
   });
 });

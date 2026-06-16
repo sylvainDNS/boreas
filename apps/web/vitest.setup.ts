@@ -28,6 +28,13 @@ class ResizeObserverStub {
 globalThis.ResizeObserver =
   ResizeObserverStub as unknown as typeof ResizeObserver;
 
+// jsdom n'implémente pas `window.scrollTo` (il logue « Not implemented:
+// Window's scrollTo() method » via sa console virtuelle). TanStack Router
+// l'appelle pour la restauration de scroll à chaque montage de `RouterProvider`
+// (cf. `renderWithApp`), polluant la sortie des tests d'un warning par montage.
+// Stub no-op : les tests n'assertent jamais sur la position de scroll.
+window.scrollTo = (() => {}) as typeof window.scrollTo;
+
 // Démonte l'arbre rendu entre chaque test (isolation du DOM).
 afterEach(() => {
   cleanup();

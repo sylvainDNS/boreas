@@ -72,7 +72,7 @@ describe("ReaderPane — détail local-first (#75, AC#3)", () => {
     const db = await getReplica();
     await writeArticleContent(db, "a1", "<p>Contenu hors-ligne</p>");
 
-    renderWithApp(<ReaderPane articleId="a1" />);
+    const { client } = renderWithApp(<ReaderPane articleId="a1" />);
 
     expect(
       await screen.findByRole("heading", { name: "Le vent du nord" }),
@@ -80,6 +80,13 @@ describe("ReaderPane — détail local-first (#75, AC#3)", () => {
     expect(await screen.findByText("Contenu hors-ligne")).toBeInTheDocument();
     // Aucun appel API : le détail est purement local.
     expect(mockedFetch).not.toHaveBeenCalled();
+
+    // Ce non-lu déclenche la mutation Read d'ouverture (#75), asynchrone et non
+    // observée par les assertions ci-dessus. On attend sa résolution complète :
+    // sinon, sous le timing CI, sa transition `success` re-rend ReaderPane hors
+    // d'un `act(...)` et React émet un warning. `waitFor` sonde dans `act`, donc
+    // la transition est forcément flushée dans `act` quand le compteur tombe à 0.
+    await waitFor(() => expect(client.isMutating()).toBe(0));
   });
 
   it("retombe sur l'API quand l'article n'est pas dans le corpus local", async () => {
@@ -113,12 +120,18 @@ describe("ReaderPane — Read à l'ouverture côté client (#75, AC#4)", () => {
     const db = await getReplica();
     await writeArticleContent(db, "a1", "<p>x</p>");
 
-    renderWithApp(
+    const { client } = renderWithApp(
       <ReaderPane
         articleId="a1"
         listItem={toArticle(item({ id: "a1", read: false }))}
       />,
     );
+
+    // Attend le rendu du contenu (import lazy d'`ArticleContent`) pour que sa
+    // résolution Suspense soit flushée dans `act(...)` et ne traîne pas après la
+    // fin du test — sinon React émet « update ... not wrapped in act(...) »
+    // (cf. les autres tests qui attendent le contenu).
+    await screen.findByText("x");
 
     // Le réplica passe Read (vue non-lus local-first) et l'outbox empile le patch.
     await waitFor(async () => {
@@ -133,6 +146,10 @@ describe("ReaderPane — Read à l'ouverture côté client (#75, AC#4)", () => {
         value: true,
       }),
     ]);
+    // Le `waitFor` ci-dessus n'observe que l'écriture réplica (faite dans
+    // `onMutate`, avant la fin de la mutation). On attend le règlement complet,
+    // sinon la transition `success` re-rend ReaderPane hors `act(...)`.
+    await waitFor(() => expect(client.isMutating()).toBe(0));
   });
 
   it("n'empile RIEN en ouvrant un article déjà lu", async () => {

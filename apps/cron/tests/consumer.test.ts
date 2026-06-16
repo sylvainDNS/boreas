@@ -49,6 +49,10 @@ describe("processIngestionBatch", () => {
   });
 
   it("ack tout de même un message dont l'ingestion renvoie status:error, et traite les suivants", async () => {
+    // Chemin d'erreur attendu : le consumer logue l'échec isolé. On capture le
+    // `console.error` pour garder la sortie de test propre **et** asserter qu'il
+    // a bien tracé l'incident (le log fait partie du comportement, ADR 0002).
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const messages = [
       makeMessage({ feedId: "feed-1" }),
       makeMessage({ feedId: "feed-2" }),
@@ -64,9 +68,16 @@ describe("processIngestionBatch", () => {
     expect(ingest).toHaveBeenCalledTimes(2);
     expect(messages[0]?.ack).toHaveBeenCalledTimes(1);
     expect(messages[1]?.ack).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[cron:queue] ingestion en erreur"),
+      expect.objectContaining({ feedId: "feed-1", error: "http_500" }),
+    );
+    errorSpy.mockRestore();
   });
 
   it("ack tout de même un message dont l'ingestion rejette, sans bloquer les suivants", async () => {
+    // Idem : `ingest` qui lève est isolé et logué ; on capture le log.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const messages = [
       makeMessage({ feedId: "feed-1" }),
       makeMessage({ feedId: "feed-2" }),
@@ -81,6 +92,12 @@ describe("processIngestionBatch", () => {
     expect(ingest).toHaveBeenCalledTimes(2);
     expect(messages[0]?.ack).toHaveBeenCalledTimes(1);
     expect(messages[1]?.ack).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[cron:queue] ingestion a levé"),
+      "feed-1",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 
   it("ne fait rien sur un batch vide", async () => {
@@ -138,6 +155,8 @@ describe("processIngestionBatch", () => {
   });
 
   it("ack tout de même et poursuit si la notification (#80) lève", async () => {
+    // `notify` best-effort qui lève est isolé et logué ; on capture le log.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const messages = [
       makeMessage({ feedId: "feed-1" }),
       makeMessage({ feedId: "feed-2" }),
@@ -154,6 +173,12 @@ describe("processIngestionBatch", () => {
     expect(notify).toHaveBeenCalledTimes(2);
     expect(messages[0]?.ack).toHaveBeenCalledTimes(1);
     expect(messages[1]?.ack).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[cron:queue] notification push a levé"),
+      "feed-1",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 });
 

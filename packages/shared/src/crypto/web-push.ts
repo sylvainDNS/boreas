@@ -239,6 +239,24 @@ export interface VapidKeys {
   subject: string;
 }
 
+/**
+ * Assemble les `VapidKeys` depuis l'environnement Worker (privée = secret).
+ * Source unique du mapping `env → VapidKeys`, partagée par l'API et le Cron
+ * (#92) : le type est structurel, n'importe quel `Env` exposant les 3 champs
+ * convient.
+ */
+export function vapidKeysFromEnv(env: {
+  VAPID_PUBLIC_KEY: string;
+  VAPID_PRIVATE_KEY: string;
+  VAPID_SUBJECT: string;
+}): VapidKeys {
+  return {
+    publicKey: env.VAPID_PUBLIC_KEY,
+    privateKey: env.VAPID_PRIVATE_KEY,
+    subject: env.VAPID_SUBJECT,
+  };
+}
+
 /** Requête HTTP prête à POSTer vers le service push. */
 export interface WebPushRequest {
   url: string;

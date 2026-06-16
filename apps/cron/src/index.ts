@@ -7,7 +7,7 @@
  * Tester le scheduled localement : wrangler dev --config wrangler.jsonc --test-scheduled
  */
 import { getDb, type IngestionMessage, ingestFeed } from "@boreas/shared";
-import type { VapidKeys } from "@boreas/shared/crypto";
+import { vapidKeysFromEnv } from "@boreas/shared/crypto";
 import { processIngestionBatch, runScheduledTick } from "./consumer";
 import { notifyNewArticles } from "./push-notify";
 
@@ -25,15 +25,6 @@ interface Env {
   VAPID_PRIVATE_KEY: string;
   /** Sujet VAPID (`mailto:` ou URL de contact) (#80). */
   VAPID_SUBJECT: string;
-}
-
-/** Clés VAPID assemblées depuis l'environnement (privée = secret Worker, #80). */
-function vapidKeys(env: Env): VapidKeys {
-  return {
-    publicKey: env.VAPID_PUBLIC_KEY,
-    privateKey: env.VAPID_PRIVATE_KEY,
-    subject: env.VAPID_SUBJECT,
-  };
 }
 
 export default {
@@ -68,7 +59,7 @@ export default {
     _ctx: ExecutionContext,
   ): Promise<void> {
     const db = getDb(env.DB);
-    const vapid = vapidKeys(env);
+    const vapid = vapidKeysFromEnv(env);
     console.log("[cron:queue] batch received", {
       queue: batch.queue,
       count: batch.messages.length,

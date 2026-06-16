@@ -3,8 +3,8 @@ import {
   pushSubscriptionSchema,
   pushUnsubscribeSchema,
 } from "@boreas/api-contracts";
-import { getDb, pushSubscriptions } from "@boreas/shared";
-import { sendWebPush, type VapidKeys } from "@boreas/shared/crypto";
+import { getDb, pushSubscriptions, sendPushAndPrune } from "@boreas/shared";
+import { vapidKeysFromEnv } from "@boreas/shared/crypto";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -20,15 +20,6 @@ import type { Env } from "../env";
  * jamais échouer l'enregistrement ; un endpoint déjà mort (404/410) est purgé.
  */
 export const pushRoutes = new Hono<{ Bindings: Env }>();
-
-/** Clés VAPID assemblées depuis l'environnement (privée = secret Worker). */
-function vapidKeys(env: Env): VapidKeys {
-  return {
-    publicKey: env.VAPID_PUBLIC_KEY,
-    privateKey: env.VAPID_PRIVATE_KEY,
-    subject: env.VAPID_SUBJECT,
-  };
-}
 
 /** Payload du push de bienvenue (= notification de test). Consommé par le SW. */
 const WELCOME_PAYLOAD: PushNotificationPayload = {
@@ -59,19 +50,13 @@ pushRoutes.post("/subscribe", async (c) => {
   // Notification de test, best-effort. Purge si l'endpoint est déjà périmé.
   // On loggue l'échec (Workers Logs activés) : sans cela, une mauvaise config
   // VAPID ferait disparaître le push de test en silence, indébogable.
-  const result = await sendWebPush(
+  await sendPushAndPrune(
+    db,
     { endpoint, keys },
     JSON.stringify(WELCOME_PAYLOAD),
-    vapidKeys(c.env),
-  ).catch((err) => {
-    console.error("push de bienvenue échoué", err);
-    return null;
-  });
-  if (result?.gone) {
-    await db
-      .delete(pushSubscriptions)
-      .where(eq(pushSubscriptions.endpoint, endpoint));
-  }
+    vapidKeysFromEnv(c.env),
+    { label: "push de bienvenue échoué" },
+  );
 
   return c.json({ ok: true }, 201);
 });

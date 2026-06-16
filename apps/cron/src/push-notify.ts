@@ -13,9 +13,8 @@
 
 import type { PushNotificationPayload } from "@boreas/api-contracts";
 import type { IngestResult } from "@boreas/shared";
-import { type Db, pushSubscriptions } from "@boreas/shared";
-import { sendWebPush, type VapidKeys } from "@boreas/shared/crypto";
-import { eq } from "drizzle-orm";
+import { type Db, pushSubscriptions, sendPushAndPrune } from "@boreas/shared";
+import type { VapidKeys } from "@boreas/shared/crypto";
 
 /**
  * Compose le payload de notification d'un Feed à partir de son issue d'ingestion
@@ -67,25 +66,19 @@ export async function notifyNewArticles(
 
   // Envois indépendants → en parallèle (borne la latence à ~1 round-trip plutôt
   // que la somme), chacun isolé : une erreur n'interrompt pas les autres abonnés.
+  // Émission + purge sur endpoint périmé sont factorisées dans `sendPushAndPrune`.
   await Promise.all(
-    subscriptions.map(async (sub) => {
-      const sent = await sendWebPush(
+    subscriptions.map((sub) =>
+      sendPushAndPrune(
+        db,
         {
           endpoint: sub.endpoint,
           keys: { p256dh: sub.p256dh, auth: sub.auth },
         },
         payload,
         vapid,
-        { fetchImpl },
-      ).catch((err) => {
-        console.error("[cron:queue] envoi push échoué", sub.endpoint, err);
-        return null;
-      });
-      if (sent?.gone) {
-        await db
-          .delete(pushSubscriptions)
-          .where(eq(pushSubscriptions.endpoint, sub.endpoint));
-      }
-    }),
+        { fetchImpl, label: "[cron:queue] envoi push échoué" },
+      ),
+    ),
   );
 }

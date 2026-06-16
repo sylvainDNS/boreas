@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "./api";
@@ -162,7 +162,12 @@ describe("useTheme", () => {
       wrapper: wrapper(client),
     });
 
-    result.current.setPreference("dark");
+    // `setPreference` met à jour `useSyncExternalStore` de façon synchrone : on
+    // l'enveloppe dans `act(...)` (renderHook n'enveloppe pas les appels directs
+    // aux fonctions retournées) pour flusher ce re-rendu dans `act`.
+    act(() => {
+      result.current.setPreference("dark");
+    });
 
     // Application locale synchrone, avant tout aller-retour réseau.
     expect(document.documentElement.dataset.theme).toBe("dark");
@@ -175,6 +180,9 @@ describe("useTheme", () => {
       }),
     );
     await waitFor(() => expect(result.current.preference).toBe("dark"));
+    // Le PATCH est fire-and-forget : on attend que la mutation se règle, sinon
+    // sa transition `success` re-rend le hook hors `act(...)` (warning React).
+    await waitFor(() => expect(client.isMutating()).toBe(0));
   });
 
   it("n'altère pas le thème local si le PATCH échoue", async () => {
@@ -184,10 +192,15 @@ describe("useTheme", () => {
       wrapper: wrapper(client),
     });
 
-    result.current.setPreference("dark");
+    act(() => {
+      result.current.setPreference("dark");
+    });
     expect(document.documentElement.dataset.theme).toBe("dark");
 
     await waitFor(() => expect(mockedFetch).toHaveBeenCalled());
+    // Attend que la mutation se règle (ici en erreur) pour que sa transition
+    // d'état soit flushée dans `act(...)` (warning React), avant les assertions.
+    await waitFor(() => expect(client.isMutating()).toBe(0));
     // Le PATCH a échoué (fire-and-forget) : le thème local reste appliqué.
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(getStoredPreference()).toBe("dark");

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Caf&eacute; &amp; V&eacute;lo</title>
+    <link>https://example.com/</link>
+    <!--
+      Calqué sur un flux WordPress réel (muZarde) : entités non décodées par
+      fast-xml-parser. Titres = références numériques (&#8217;, &#038;) en nœud
+      texte ; description = entités nommées HTML (&rsquo;, &eacute;) en CDATA.
+    -->
+    <item>
+      <title>BCN et BPF : Haute-Garonne &#038; Tarn — il n&#8217;y a plus</title>
+      <link>https://example.com/articles/1</link>
+      <guid isPermaLink="false">article-entities-1</guid>
+      <description><![CDATA[<p>Cet article qu&rsquo;on adore : un caf&eacute; bien serr&eacute;.</p>]]></description>
+      <pubDate>Tue, 02 Jun 2026 08:30:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

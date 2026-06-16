@@ -1,3 +1,4 @@
+import { decodeHTML } from "entities";
 import { XMLParser } from "fast-xml-parser";
 
 /**
@@ -76,7 +77,7 @@ export function parseFeed(
   if (rss?.channel) {
     const channel = first(rss.channel) as Record<string, unknown>;
     return {
-      title: textOf(channel.title),
+      title: decodeEntities(textOf(channel.title)),
       items: asRecords(channel.item).map(parseRssItem),
     };
   }
@@ -85,7 +86,7 @@ export function parseFeed(
   const feed = doc.feed as Record<string, unknown> | undefined;
   if (feed) {
     return {
-      title: textOf(feed.title),
+      title: decodeEntities(textOf(feed.title)),
       items: asRecords(feed.entry).map(parseAtomEntry),
     };
   }
@@ -95,7 +96,7 @@ export function parseFeed(
   if (rdf) {
     const channel = first(rdf.channel) as Record<string, unknown> | undefined;
     return {
-      title: textOf(channel?.title),
+      title: decodeEntities(textOf(channel?.title)),
       items: asRecords(rdf.item).map(parseRssItem),
     };
   }
@@ -111,7 +112,7 @@ function parseRssItem(item: Record<string, unknown>): ParsedItem {
   return {
     guid: textOf(item.guid),
     link: textOf(item.link),
-    title: textOf(item.title),
+    title: decodeEntities(textOf(item.title)),
     content,
     summary: stripToSummary(content),
     publishedAt: toUtcIso(textOf(item.pubDate) ?? textOf(item["dc:date"])),
@@ -127,7 +128,7 @@ function parseAtomEntry(entry: Record<string, unknown>): ParsedItem {
   return {
     guid: textOf(entry.id),
     link: atomAlternateLink(links),
-    title: textOf(entry.title),
+    title: decodeEntities(textOf(entry.title)),
     content,
     summary: stripToSummary(content),
     publishedAt: toUtcIso(textOf(entry.published) ?? textOf(entry.updated)),
@@ -322,17 +323,23 @@ function attrOf(node: unknown, name: string): string | null {
   return null;
 }
 
+/**
+ * Décode les entités HTML (numériques `&#8217;` et nommées `&eacute;`) d'un
+ * texte. fast-xml-parser ne décode que les 5 entités XML standard : titres et
+ * résumés doivent être décodés explicitement, comme le corps l'est via linkedom
+ * (sinon les flux WordPress affichent `caf&eacute;` / `&#038;`).
+ * Ne pas appliquer aux URLs (`&copy=…` deviendrait `©=…`).
+ */
+function decodeEntities(value: string | null): string | null {
+  return value === null ? null : decodeHTML(value);
+}
+
 /** Réduit un contenu HTML à un résumé texte tronqué. */
 function stripToSummary(html: string | null): string | null {
   if (!html) return null;
-  const text = html
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
+  // Retire les balises d'abord, puis décode les entités (collapse `&nbsp;`
+  // (U+00A0) et les autres blancs en espace simple via \s).
+  const text = decodeHTML(html.replace(/<[^>]*>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
   if (!text) return null;

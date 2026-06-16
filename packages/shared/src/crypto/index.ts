@@ -24,4 +24,5 @@ export {
   createVapidJwt,
   encryptPayload,
   sendWebPush,
+  vapidKeysFromEnv,
 } from "./web-push";

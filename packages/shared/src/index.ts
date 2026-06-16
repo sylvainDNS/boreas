@@ -41,6 +41,7 @@ export {
   getDueFeedIds,
   ingestFeed,
 } from "./ingestion";
+export { sendPushAndPrune } from "./push";
 export type { ResubscribeOptions } from "./resubscribe";
 export { resubscribeFeed, resubscribeFeeds } from "./resubscribe";
 export {

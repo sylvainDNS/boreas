@@ -28,21 +28,64 @@ const IMG_PROXY_PREFIX = "/api/img";
  * dédoublonnés dans l'ordre d'apparition. Logique **pure** (pas de Cache Storage),
  * donc testable sans `caches` : c'est elle qui détermine quelles images pré-chauffer.
  *
- * On parse via `DOMParser` (contexte page) plutôt qu'en regex : il gère les entités
- * et attributs mal formés sans faux positifs. On ne retient que les `src`
- * commençant par `/api/img` — les images externes non proxifiées (rare, le
- * sanitizer les réécrit) ou `data:` sont ignorées : elles ne passent pas par le SW.
+ * Deux chemins selon le contexte d'exécution :
+ *  - **page** (`DOMParser` disponible) : on parse le DOM — il gère les entités et
+ *    attributs mal formés sans faux positifs ; `getAttribute("src")` (et non
+ *    `img.src`) garde la valeur **brute** relative `/api/img?…`, sans résolution
+ *    absolue dépendant du `base` du document de parsing.
+ *  - **service worker** (#80, `DOMParser` absent du `WorkerGlobalScope`) : le
+ *    handler `push` lance la sync dans le SW, donc cette extraction doit y tourner.
+ *    On retombe sur un parsing **regex** qui décode au passage les entités de la
+ *    query-string (`&amp;` → `&`), faute de quoi la clé du Cache Storage chauffée
+ *    (`/api/img?u=…&amp;sig=…`) divergerait du `<img src>` décodé par le
+ *    navigateur au rendu, et l'image ne serait jamais servie hors-ligne.
+ *
+ * On ne retient que les `src` commençant par `/api/img` — les images externes non
+ * proxifiées (rare, le sanitizer les réécrit) ou `data:` sont ignorées : elles ne
+ * passent pas par le SW.
  */
 export function imageUrlsFromHtml(html: string | null | undefined): string[] {
   if (!html) return [];
-  const doc = new DOMParser().parseFromString(html, "text/html");
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const urls = new Set<string>();
+    for (const img of doc.querySelectorAll("img")) {
+      const src = img.getAttribute("src");
+      if (src?.startsWith(IMG_PROXY_PREFIX)) urls.add(src);
+    }
+    return [...urls];
+  }
+  return imageUrlsFromHtmlViaRegex(html);
+}
+
+/** Entités HTML rencontrées dans une query-string proxifiée, décodées en `&`. */
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&#38;/g, "&")
+    .replace(/&#x26;/gi, "&");
+}
+
+/**
+ * Repli **service worker** d'`imageUrlsFromHtml` (DOMParser indisponible) : scanne
+ * en **une passe** les attributs `src` quotés du HTML, décode les entités de la
+ * query-string, et conserve les `/api/img…` dédoublonnés dans l'ordre.
+ *
+ * On scanne les `src` **directement** plutôt que de découper d'abord en balises
+ * `<img …>` : un `>` présent dans un attribut antérieur (`alt`/`title`, autorisés
+ * par le sanitizer et non échappés en sortie) tronquerait la balise et ferait
+ * perdre le `src`. Le sanitizer ne proxifie que les `src` d'`<img>` vers
+ * `/api/img` (aucun autre élément ne porte ce préfixe), donc filtrer sur
+ * `/api/img` préserve la parité avec le chemin DOM (qui ne lit que les `<img>`).
+ */
+function imageUrlsFromHtmlViaRegex(html: string): string[] {
   const urls = new Set<string>();
-  for (const img of doc.querySelectorAll("img")) {
-    // `getAttribute` (et non `img.src`) : on veut la valeur **brute** relative
-    // `/api/img?…` telle qu'écrite par le sanitizer, pas une résolution absolue
-    // (qui dépendrait du `base` du document de parsing).
-    const src = img.getAttribute("src");
-    if (src?.startsWith(IMG_PROXY_PREFIX)) urls.add(src);
+  const srcAttr = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  for (const match of html.matchAll(srcAttr)) {
+    const raw = match[1] ?? match[2];
+    if (!raw) continue;
+    const src = decodeHtmlEntities(raw);
+    if (src.startsWith(IMG_PROXY_PREFIX)) urls.add(src);
   }
   return [...urls];
 }

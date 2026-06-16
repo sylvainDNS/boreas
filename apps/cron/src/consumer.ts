@@ -28,6 +28,13 @@ export interface AckableMessage<T> {
 /** Dépendances injectables du traitement d'un batch (ingestion d'un Feed). */
 export interface IngestionDeps {
   ingest(feedId: string): Promise<IngestResult>;
+  /**
+   * Émet la notification push « article prêt à lire » d'un Feed (#80), appelée
+   * **après** une ingestion ayant inséré des net-new. Optionnelle : absente, le
+   * batch s'ingère sans notifier (env sans VAPID, tests). Best-effort — son
+   * échec est isolé par `processIngestionBatch` et ne bloque jamais l'ack.
+   */
+  notify?(result: IngestResult): Promise<void>;
 }
 
 /**
@@ -44,6 +51,20 @@ export async function processIngestionBatch<T extends IngestionMessage>(
   for (const message of messages) {
     try {
       const result = await deps.ingest(message.body.feedId);
+      // Notification push (#80), best-effort : uniquement quand l'ingestion a
+      // inséré des net-new. Son échec (réseau, VAPID, idb) est isolé ici pour ne
+      // jamais empêcher l'ack ni le traitement des messages suivants.
+      if (result.status === "updated" && result.inserted > 0) {
+        try {
+          await deps.notify?.(result);
+        } catch (err) {
+          console.error(
+            "[cron:queue] notification push a levé",
+            result.feedId,
+            err,
+          );
+        }
+      }
       if (result.status === "error") {
         console.error("[cron:queue] ingestion en erreur", {
           feedId: result.feedId,

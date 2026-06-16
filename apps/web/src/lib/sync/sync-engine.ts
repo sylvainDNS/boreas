@@ -2,7 +2,6 @@ import type {
   ArticleContentResponse,
   SyncResponse,
 } from "@boreas/api-contracts";
-import { shouldSkipHeavyContent } from "../wifi-only";
 import {
   imageUrlsFromHtml,
   reconcileImageCache,
@@ -51,7 +50,9 @@ const CONTENT_BATCH_SIZE = 50;
  * dans le store `content` (#75, ADR 0018). N'appelle le réseau que pour les ids
  * **absents** du store (pas de re-téléchargement), par lots bornés. Best-effort :
  * une erreur réseau (hors-ligne) est **avalée** — la sync (delta déjà appliqué)
- * ne doit pas échouer ; le contenu sera rapatrié à une passe ultérieure.
+ * ne doit pas échouer ; le contenu sera rapatrié à une passe ultérieure. Exécuté
+ * aussi depuis le handler `push` du SW (#80) : c'est lui qui rend l'article
+ * lisible hors-ligne avant l'affichage de la notification.
  *
  * **Pré-chauffage des images (#77, ADR 0018)** : pour chaque HTML fraîchement
  * téléchargé, on extrait ses `src` proxifiés (`/api/img…`) et on les pré-chauffe
@@ -65,11 +66,6 @@ async function prefetchContent(
   fetchContent: FetchContent,
 ): Promise<void> {
   try {
-    // Gating Wi-Fi-only (#81) : sur connexion mesurée avec le réglage ON, on
-    // **saute le contenu lourd** (HTML + images). Le delta (métadonnées) a déjà
-    // été appliqué en amont dans `runSync` — il n'est jamais gaté ici. Best-effort.
-    if (shouldSkipHeavyContent()) return;
-
     const corpus = await unreadOrSavedIds(db);
     const missing = await missingContentIds(db, corpus);
     // (1) On persiste d'abord **tout** le HTML (donnée critique de lecture offline),
@@ -160,9 +156,7 @@ const noopFetchContent: FetchContent = async () => [];
  *  6. **pré-téléchargement du contenu** (#75) : HTML des non-lus ∪ Saved manquant,
  *     stocké en IndexedDB (best-effort, avalé hors-ligne) — la lecture devient
  *     possible hors-ligne sans avoir ouvert l'article. Le Read n'étant plus un
- *     effet du GET (#75), ce pré-chauffage ne passe AUCUN article en lu. **Gaté
- *     Wi-Fi-only** (#81) : sur connexion mesurée + réglage ON, ce contenu lourd
- *     est sauté (les métadonnées, elles, ont déjà été synchronisées en 2-4).
+ *     effet du GET (#75), ce pré-chauffage ne passe AUCUN article en lu.
  *
  * Idempotente et sûre à rejouer (déclencheurs multiples) : un échec réseau du
  * pull remonte tel quel sans avancer le curseur au-delà de la dernière page
@@ -240,8 +234,8 @@ export async function runSync(
     }
   }
 
-  // --- (6) Pré-téléchargement du contenu offline (#75), best-effort, gaté
-  //         Wi-Fi-only (#81 : le delta ci-dessus a déjà synchronisé les
-  //         métadonnées ; seul ce contenu lourd peut être sauté). ---
+  // --- (6) Pré-téléchargement du contenu offline (#75), best-effort. Le delta
+  //         ci-dessus a déjà synchronisé les métadonnées ; ce contenu lourd
+  //         (HTML + images) rend les articles lisibles hors-ligne. ---
   await prefetchContent(db, fetchContent);
 }

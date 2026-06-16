@@ -18,6 +18,7 @@ function ingestResult(overrides: Partial<IngestResult> = {}): IngestResult {
     feedId: "feed-1",
     status: "updated",
     inserted: 0,
+    newArticleTitles: [],
     itemCount: 0,
     title: null,
     consecutiveFailures: 0,
@@ -88,6 +89,71 @@ describe("processIngestionBatch", () => {
     await processIngestionBatch([], { ingest });
 
     expect(ingest).not.toHaveBeenCalled();
+  });
+
+  it("notifie (#80) un Feed dont l'ingestion a inséré des net-new", async () => {
+    const ingest = vi.fn(async (feedId: string) =>
+      ingestResult({ feedId, inserted: 2, newArticleTitles: ["A", "B"] }),
+    );
+    const notify = vi.fn(async () => {});
+
+    await processIngestionBatch([makeMessage({ feedId: "feed-1" })], {
+      ingest,
+      notify,
+    });
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]?.[0]).toMatchObject({
+      feedId: "feed-1",
+      inserted: 2,
+    });
+  });
+
+  it("ne notifie pas quand aucun article net-new n'est inséré (inserted=0)", async () => {
+    const ingest = vi.fn(async (feedId: string) =>
+      ingestResult({ feedId, status: "not_modified", inserted: 0 }),
+    );
+    const notify = vi.fn(async () => {});
+
+    await processIngestionBatch([makeMessage({ feedId: "feed-1" })], {
+      ingest,
+      notify,
+    });
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("ne notifie pas un Feed en erreur, même avec un inserted résiduel improbable", async () => {
+    const ingest = vi.fn(async (feedId: string) =>
+      ingestResult({ feedId, status: "error", error: "http_500", inserted: 0 }),
+    );
+    const notify = vi.fn(async () => {});
+
+    await processIngestionBatch([makeMessage({ feedId: "feed-1" })], {
+      ingest,
+      notify,
+    });
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("ack tout de même et poursuit si la notification (#80) lève", async () => {
+    const messages = [
+      makeMessage({ feedId: "feed-1" }),
+      makeMessage({ feedId: "feed-2" }),
+    ];
+    const ingest = vi.fn(async (feedId: string) =>
+      ingestResult({ feedId, inserted: 1, newArticleTitles: ["A"] }),
+    );
+    const notify = vi.fn(async () => {
+      throw new Error("push boom");
+    });
+
+    await processIngestionBatch(messages, { ingest, notify });
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(messages[0]?.ack).toHaveBeenCalledTimes(1);
+    expect(messages[1]?.ack).toHaveBeenCalledTimes(1);
   });
 });
 

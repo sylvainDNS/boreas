@@ -3,3 +3,12 @@
 # d'images à l'ingestion, l'API les vérifie au proxy (#16). En prod, c'est un
 # secret Worker partagé (`wrangler secret put HMAC_SECRET`).
 HMAC_SECRET=dev-secret-not-for-prod
+
+# Web Push VAPID (#80) — le Cron émet un push par Feed ayant des articles
+# net-new. Utiliser la MÊME paire que l'API (apps/api/.dev.vars) pour qu'un
+# abonnement créé côté API soit notifiable côté Cron. NE PAS committer de vraie
+# clé ici. Générer la paire (cf. apps/api/.dev.vars.example) et la coller dans
+# .dev.vars (gitignoré) ; en prod, VAPID_PRIVATE_KEY va dans un secret Worker.
+VAPID_PRIVATE_KEY=
+VAPID_PUBLIC_KEY=
+VAPID_SUBJECT=mailto:dev@boreas.sylvaindenyse.me

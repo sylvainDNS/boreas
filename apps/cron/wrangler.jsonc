@@ -18,6 +18,15 @@
   "triggers": {
     "crons": ["*/5 * * * *"]
   },
+  // Web Push (#80) : le consommateur de Queue émet un push par Feed ayant des
+  // articles net-new. VAPID_PRIVATE_KEY est un secret Worker (posé via
+  // `wrangler secret put`, MÊME paire que boreas-api). VAPID_PUBLIC_KEY (point
+  // P-256 brut base64url) et VAPID_SUBJECT ne sont pas secrets. En local,
+  // .dev.vars surcharge avec la paire jetable de dev.
+  "vars": {
+    "VAPID_PUBLIC_KEY": "BMgR-UrYVwD2XDYIbhnADIml3lqInfFdqlJt8GC09p2BlQ5IYrIH-M66sffxm9f3qCbzeknsYzBqC4aSD8Wm1IM",
+    "VAPID_SUBJECT": "mailto:contact@boreas.sylvaindenyse.me"
+  },
   "queues": {
     // Le Cron est à la fois producteur (scheduled → enqueue les feeds dus)
     // et consommateur (queue → ingère chaque feed) de boreas-ingestion. (ADR 0002)

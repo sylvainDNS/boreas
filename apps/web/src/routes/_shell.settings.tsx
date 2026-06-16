@@ -6,7 +6,6 @@ import { PushToggle } from "../components/PushToggle";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Button } from "../components/ui/Button";
 import { Select } from "../components/ui/Select";
-import { WifiOnlyToggle } from "../components/WifiOnlyToggle";
 import { downloadOpmlExport } from "../lib/opml";
 import {
   settingsQueryOptions,
@@ -121,12 +120,6 @@ export function SettingsView() {
             <div className="w-48">
               <ThemeToggle />
             </div>
-          </Row>
-          <Row
-            label="Télécharger le contenu en Wi-Fi uniquement"
-            hint="Sur connexion mobile, ne télécharge pas le contenu des articles ni les images. Les titres et l'état de lecture se synchronisent toujours. Réglage propre à cet appareil."
-          >
-            <WifiOnlyToggle />
           </Row>
           <Row
             label="Notifications push"

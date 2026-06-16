@@ -11,6 +11,7 @@ import { CacheFirst } from "workbox-strategies";
 import { buildNotification } from "./lib/push";
 import { PERIODIC_SYNC_TAG } from "./lib/pwa";
 import { IMAGE_CACHE } from "./lib/sync/image-cache";
+import { syncReplica } from "./lib/sync/replica";
 
 /**
  * Service worker custom de Boréas (#76, ADR 0018) — mode `injectManifest` :
@@ -39,6 +40,11 @@ import { IMAGE_CACHE } from "./lib/sync/image-cache";
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
 };
+
+// Borne l'attente de la sync déclenchée par un push (#80) avant d'afficher la
+// notif : garantit une notification visible dans le budget d'exécution du push
+// même si la sync traîne (réseau lent).
+const PUSH_SYNC_TIMEOUT_MS = 25_000;
 
 // 1. Precache du shell + nettoyage des révisions précédentes au versioning.
 precacheAndRoute(self.__WB_MANIFEST);
@@ -123,13 +129,21 @@ self.addEventListener("periodicsync", (event) => {
   );
 });
 
-// 6. Web Push (#79, ADR 0018) : à la réception d'un push, on affiche une
-//    notification. Le payload (JSON émis par le serveur) est traduit par
-//    `buildNotification` (pure, testée) ; un payload absent/illisible retombe sur
-//    un repli plutôt que de planter — Chrome exige une notification VISIBLE pour
-//    chaque push (sinon il révoque l'abonnement). Pour CE ticket, c'est la
-//    notification de test (push de bienvenue) ; le téléchargement préalable du
-//    contenu (delta + HTML + images) avant l'affichage est du ressort de #80.
+// 6. Web Push (#79/#80, ADR 0018) : à la réception d'un push, on **télécharge
+//    d'abord** (delta + contenu HTML + images via le moteur de sync) **puis** on
+//    affiche la notification — elle n'apparaît que quand l'article est réellement
+//    lisible hors-ligne (#80). Le contenu visible (titre = Feed, corps = article
+//    + « +N autres », tag = feedId, url = /feeds/:id) vient du **payload serveur**,
+//    traduit par `buildNotification` (pure, testée) ; un payload absent/illisible
+//    retombe sur un repli plutôt que de planter.
+//
+//    La sync est **best-effort** : hors-ligne ou en échec, on affiche quand même
+//    (Chrome exige une notification VISIBLE par push, sinon il révoque
+//    l'abonnement) ; un `Promise.race` avec timeout borne l'attente pour ne pas
+//    dépasser le budget d'exécution du push si le réseau traîne. C'est l'unique
+//    endroit où le SW déclenche lui-même la sync (réutilise `syncReplica` —
+//    aucune logique de données dupliquée, ADR 0018) : un push pouvant arriver sans
+//    onglet ouvert, on ne peut pas déléguer au contexte page comme `periodicsync`.
 self.addEventListener("push", (event) => {
   let payload: unknown = null;
   try {
@@ -140,7 +154,20 @@ self.addEventListener("push", (event) => {
   const { title, options } = buildNotification(
     payload as Parameters<typeof buildNotification>[0],
   );
-  event.waitUntil(self.registration.showNotification(title, options));
+  // `syncReplica` porte sa propre dédup ; on avale son échec ici pour toujours
+  // afficher la notif et éviter un rejet non géré si le timeout gagne la course.
+  // Le timer du timeout est annulé dès que la course se résout (cas commun : la
+  // sync gagne), pour ne pas laisser un setTimeout pendant garder le SW éveillé.
+  const downloaded = syncReplica().catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, PUSH_SYNC_TIMEOUT_MS);
+  });
+  event.waitUntil(
+    Promise.race([downloaded, timeout])
+      .then(() => self.registration.showNotification(title, options))
+      .finally(() => clearTimeout(timer)),
+  );
 });
 
 // 7. Tap sur une notification (#79) : on referme, puis on **focalise** un onglet

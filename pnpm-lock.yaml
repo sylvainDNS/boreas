@@ -69,9 +69,15 @@ importers:
 
   apps/cron:
     dependencies:
+      '@boreas/api-contracts':
+        specifier: workspace:*
+        version: link:../../packages/api-contracts
       '@boreas/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@cloudflare/workers-types@4.20260527.1)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.16.10

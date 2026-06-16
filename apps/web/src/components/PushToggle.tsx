@@ -8,11 +8,10 @@ import {
 } from "../lib/push";
 
 /**
- * Interrupteur des **notifications push** (#79, ADR 0018). Sur le patron visuel de
- * `WifiOnlyToggle` (`role="switch"`, état via `aria-checked`), mais l'autorité
- * d'état est l'**abonnement réel** de l'appareil (`pushManager.getSubscription`),
- * pas un réglage : activer demande la permission + (dés)abonne, et le serveur
- * répond par une notification de test.
+ * Interrupteur des **notifications push** (#79, ADR 0018). Bouton `role="switch"`
+ * (état via `aria-checked`), mais l'autorité d'état est l'**abonnement réel** de
+ * l'appareil (`pushManager.getSubscription`), pas un réglage : activer demande la
+ * permission + (dés)abonne, et le serveur répond par une notification de test.
  *
  * Inerte si le Web Push n'est pas supporté (composant non rendu) ou si la
  * permission est **bloquée** (`denied`, irrévocable côté JS) : on désactive alors

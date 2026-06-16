@@ -7,7 +7,9 @@
  * Tester le scheduled localement : wrangler dev --config wrangler.jsonc --test-scheduled
  */
 import { getDb, type IngestionMessage, ingestFeed } from "@boreas/shared";
+import type { VapidKeys } from "@boreas/shared/crypto";
 import { processIngestionBatch, runScheduledTick } from "./consumer";
+import { notifyNewArticles } from "./push-notify";
 
 interface Env {
   DB: D1Database;
@@ -17,6 +19,21 @@ interface Env {
   HMAC_SECRET: string;
   /** Queue d'ingestion — producteur (scheduled → enqueue) et consommateur (queue → ingest). */
   INGESTION_QUEUE: Queue<IngestionMessage>;
+  /** Clé publique VAPID (point P-256 brut, base64url) — `k=` du header push (#80). */
+  VAPID_PUBLIC_KEY: string;
+  /** Clé privée VAPID (PKCS#8 base64url) — secret Worker, signe le JWT push (#80). */
+  VAPID_PRIVATE_KEY: string;
+  /** Sujet VAPID (`mailto:` ou URL de contact) (#80). */
+  VAPID_SUBJECT: string;
+}
+
+/** Clés VAPID assemblées depuis l'environnement (privée = secret Worker, #80). */
+function vapidKeys(env: Env): VapidKeys {
+  return {
+    publicKey: env.VAPID_PUBLIC_KEY,
+    privateKey: env.VAPID_PRIVATE_KEY,
+    subject: env.VAPID_SUBJECT,
+  };
 }
 
 export default {
@@ -42,7 +59,8 @@ export default {
   /**
    * Consommateur de Queue : adapter trivial — logue l'entrée puis délègue à
    * `processIngestionBatch`, en injectant `ingestFeed` lié au contexte du Worker
-   * (D1 + R2 + HMAC). La politique ack-toujours vit dans le module (ADR 0002, #11).
+   * (D1 + R2 + HMAC) et `notifyNewArticles` (push « article prêt à lire », #80,
+   * best-effort). La politique ack-toujours vit dans le module (ADR 0002, #11).
    */
   async queue(
     batch: MessageBatch<IngestionMessage>,
@@ -50,6 +68,7 @@ export default {
     _ctx: ExecutionContext,
   ): Promise<void> {
     const db = getDb(env.DB);
+    const vapid = vapidKeys(env);
     console.log("[cron:queue] batch received", {
       queue: batch.queue,
       count: batch.messages.length,
@@ -57,6 +76,7 @@ export default {
 
     await processIngestionBatch(batch.messages, {
       ingest: (feedId) => ingestFeed(feedId, db, env.BUCKET, env.HMAC_SECRET),
+      notify: (result) => notifyNewArticles(result, db, vapid),
     });
   },
 };

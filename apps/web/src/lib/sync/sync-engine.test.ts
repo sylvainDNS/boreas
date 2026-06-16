@@ -2,7 +2,6 @@ import "fake-indexeddb/auto";
 import type { SyncArticle, SyncResponse } from "@boreas/api-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api";
-import { setWifiOnly } from "../wifi-only";
 import { enqueueOutbox, type PushOutbox, readOutbox } from "./outbox-store";
 import {
   deleteReplica,
@@ -13,22 +12,6 @@ import {
   writeArticleContent,
 } from "./replica-store";
 import { type FetchContent, runSync } from "./sync-engine";
-
-/** Pose un faux `navigator.connection` le temps d'un test (Network Info API). */
-function withConnection(connection: unknown, run: () => Promise<void>) {
-  const nav = navigator as Navigator & { connection?: unknown };
-  const original = nav.connection;
-  Object.defineProperty(nav, "connection", {
-    configurable: true,
-    value: connection,
-  });
-  return run().finally(() => {
-    Object.defineProperty(nav, "connection", {
-      configurable: true,
-      value: original,
-    });
-  });
-}
 
 function art(id: string, read = false): SyncArticle {
   return {
@@ -442,74 +425,5 @@ describe("sync-engine — GC du contenu local (#81)", () => {
     expect(deleted).toEqual(["/api/img?u=a2&sig=y"]);
 
     (globalThis as { caches?: unknown }).caches = original;
-  });
-});
-
-describe("sync-engine — gating Wi-Fi-only (#81)", () => {
-  it("saute le pré-téléchargement du contenu sur connexion mesurée + réglage ON, mais applique le delta", async () => {
-    setWifiOnly(true);
-    await withConnection({ type: "cellular" }, async () => {
-      const fetchContent: FetchContent = vi.fn(async (ids: string[]) =>
-        ids.map((id) => ({ id, html: `<p>${id}</p>` })),
-      );
-      await runSync(
-        db,
-        async () =>
-          emptyPage({
-            upserts: { articles: [art("a1", false)], feeds: [], folders: [] },
-            cursor: 100,
-          }),
-        undefined,
-        fetchContent,
-      );
-
-      // Métadonnées (delta) synchronisées…
-      expect(await db.get("articles", "a1")).toMatchObject({ id: "a1" });
-      expect(await readSyncCursor(db)).toBe(100);
-      // …mais le contenu lourd n'a PAS été téléchargé.
-      expect(fetchContent).not.toHaveBeenCalled();
-      expect(await readArticleContent(db, "a1")).toBeUndefined();
-    });
-  });
-
-  it("télécharge le contenu sur connexion non mesurée même si le réglage est ON (Wi-Fi)", async () => {
-    setWifiOnly(true);
-    await withConnection({ type: "wifi" }, async () => {
-      const fetchContent: FetchContent = vi.fn(async (ids: string[]) =>
-        ids.map((id) => ({ id, html: `<p>${id}</p>` })),
-      );
-      await runSync(
-        db,
-        async () =>
-          emptyPage({
-            upserts: { articles: [art("a1", false)], feeds: [], folders: [] },
-            cursor: 100,
-          }),
-        undefined,
-        fetchContent,
-      );
-      expect(fetchContent).toHaveBeenCalled();
-      expect(await readArticleContent(db, "a1")).toBe("<p>a1</p>");
-    });
-  });
-
-  it("télécharge le contenu quand le réglage est off, même sur cellulaire", async () => {
-    setWifiOnly(false);
-    await withConnection({ type: "cellular" }, async () => {
-      const fetchContent: FetchContent = vi.fn(async (ids: string[]) =>
-        ids.map((id) => ({ id, html: `<p>${id}</p>` })),
-      );
-      await runSync(
-        db,
-        async () =>
-          emptyPage({
-            upserts: { articles: [art("a1", false)], feeds: [], folders: [] },
-            cursor: 100,
-          }),
-        undefined,
-        fetchContent,
-      );
-      expect(fetchContent).toHaveBeenCalled();
-    });
   });
 });

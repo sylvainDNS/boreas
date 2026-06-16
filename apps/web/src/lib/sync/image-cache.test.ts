@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   IMAGE_CACHE,
   imageUrlsFromHtml,
@@ -36,6 +36,79 @@ describe("image-cache — imageUrlsFromHtml", () => {
     expect(imageUrlsFromHtml("<p>aucune image</p>")).toEqual([]);
     expect(imageUrlsFromHtml("")).toEqual([]);
     expect(imageUrlsFromHtml(null)).toEqual([]);
+  });
+});
+
+describe("image-cache — imageUrlsFromHtml (repli SW sans DOMParser, #80)", () => {
+  // Simule le `WorkerGlobalScope` du service worker (pas de DOMParser) : le push
+  // y lance la sync, l'extraction doit donc retomber sur le parsing regex.
+  let savedDOMParser: typeof DOMParser | undefined;
+  beforeEach(() => {
+    savedDOMParser = (globalThis as { DOMParser?: typeof DOMParser }).DOMParser;
+    (globalThis as { DOMParser?: typeof DOMParser | undefined }).DOMParser =
+      undefined;
+  });
+  afterEach(() => {
+    (globalThis as { DOMParser?: typeof DOMParser | undefined }).DOMParser =
+      savedDOMParser;
+  });
+
+  it("extrait les src /api/img par regex (double ou simple quote)", () => {
+    expect(typeof DOMParser).toBe("undefined");
+    const html =
+      '<img src="/api/img?u=AAA&sig=xxx">' +
+      "<img src='/api/img?u=BBB&sig=yyy'>";
+    expect(imageUrlsFromHtml(html)).toEqual([
+      "/api/img?u=AAA&sig=xxx",
+      "/api/img?u=BBB&sig=yyy",
+    ]);
+  });
+
+  it("décode &amp; dans la query-string (clé de cache = src décodé au rendu)", () => {
+    const html = '<img src="/api/img?u=AAA&amp;sig=xxx">';
+    expect(imageUrlsFromHtml(html)).toEqual(["/api/img?u=AAA&sig=xxx"]);
+  });
+
+  it("ignore les src non proxifiés et dédoublonne", () => {
+    const html =
+      '<img src="https://cdn.example.com/x.png">' +
+      '<img src="/api/img?u=AAA&amp;sig=xxx">' +
+      '<img src="/api/img?u=AAA&amp;sig=xxx">';
+    expect(imageUrlsFromHtml(html)).toEqual(["/api/img?u=AAA&sig=xxx"]);
+  });
+
+  it("extrait le src même si un attribut antérieur contient un '>' (alt/title)", () => {
+    // Le sanitizer autorise alt/title et ne les échappe pas : un découpage par
+    // balise <img …> tronquerait au premier '>'. Le scan direct des src l'évite.
+    const html = '<img alt="1 > 0" src="/api/img?u=AAA&amp;sig=xxx">';
+    expect(imageUrlsFromHtml(html)).toEqual(["/api/img?u=AAA&sig=xxx"]);
+  });
+});
+
+describe("image-cache — imageUrlsFromHtml : parité DOMParser / repli regex (#80)", () => {
+  // Les deux chemins (page = DOMParser, SW = regex) doivent produire la MÊME clé
+  // de cache, sinon une image pré-chauffée côté SW ne serait pas servie au rendu.
+  const SAMPLES = [
+    '<p>x</p><img src="/api/img?u=AAA&amp;sig=xxx" alt="a">' +
+      '<figure><img src="/api/img?u=BBB&amp;sig=yyy"></figure>',
+    '<img src="https://cdn.example.com/x.png">' +
+      '<img src="/api/img?u=CCC&amp;sig=zzz">',
+    "<p>aucune image</p>",
+  ];
+
+  it("renvoie une sortie identique avec et sans DOMParser", () => {
+    for (const html of SAMPLES) {
+      const withDom = imageUrlsFromHtml(html);
+      const saved = (globalThis as { DOMParser?: typeof DOMParser }).DOMParser;
+      (globalThis as { DOMParser?: typeof DOMParser | undefined }).DOMParser =
+        undefined;
+      try {
+        expect(imageUrlsFromHtml(html)).toEqual(withDom);
+      } finally {
+        (globalThis as { DOMParser?: typeof DOMParser | undefined }).DOMParser =
+          saved;
+      }
+    }
   });
 });
 

@@ -65,6 +65,12 @@ export interface IngestResult {
   status: "updated" | "not_modified" | "error";
   /** Nouveaux articles réellement insérés (0 si rien de neuf ou 304). */
   inserted: number;
+  /**
+   * Titres des articles net-new réellement insérés (titres nuls filtrés), pour
+   * composer le corps de la notification push (#80). Vide hors `updated`. Peut
+   * être plus court que `inserted` si certains net-new n'avaient pas de titre.
+   */
+  newArticleTitles: string[];
   /** Items présents dans le flux parsé (0 sur 304/erreur) ; sert à détecter un flux illisible. */
   itemCount: number;
   /** Titre du flux après ingestion (évite un re-SELECT à l'appelant). */
@@ -293,6 +299,7 @@ export async function ingestFeed(
       feedId,
       status: "error",
       inserted: 0,
+      newArticleTitles: [],
       itemCount: 0,
       title: null,
       error: "feed_not_found",
@@ -306,6 +313,7 @@ export async function ingestFeed(
   let status: IngestResult["status"] = "updated";
   let error: string | undefined;
   let inserted = 0;
+  let newArticleTitles: string[] = [];
   let itemCount = 0;
   let nextEtag = feed.etag;
   let nextLastModified = feed.lastModified;
@@ -333,7 +341,7 @@ export async function ingestFeed(
       itemCount = parsed.items.length;
       // Le titre du flux peut évoluer ; on le garde à jour (ne l'écrase pas par null).
       if (parsed.title) nextTitle = parsed.title;
-      inserted = await upsertNewArticles(
+      const upserted = await upsertNewArticles(
         db,
         bucket,
         secret,
@@ -341,6 +349,8 @@ export async function ingestFeed(
         feed.url,
         parsed.items,
       );
+      inserted = upserted.count;
+      newArticleTitles = upserted.titles;
     }
   } catch (err) {
     status = "error";
@@ -382,6 +392,7 @@ export async function ingestFeed(
     feedId,
     status,
     inserted,
+    newArticleTitles,
     itemCount,
     title: nextTitle,
     error,
@@ -502,7 +513,9 @@ async function getRefreshIntervalMin(db: Db): Promise<number> {
 
 /**
  * Extrait, sanitize, stocke en R2 et insère les Articles dont la clé de dédup
- * n'existe pas déjà pour ce Feed. Renvoie le nombre d'insertions réelles.
+ * n'existe pas déjà pour ce Feed. Renvoie le nombre d'insertions réelles et les
+ * titres net-new (titres nuls filtrés), ces derniers servant à composer la
+ * notification push de #80.
  *
  * Le filtrage par clé existante évite de ré-extraire (CPU) et ré-écrire R2 tous
  * les items à chaque poll ; sur un abonnement neuf, toutes les clés sont
@@ -515,8 +528,8 @@ async function upsertNewArticles(
   feedId: string,
   feedUrl: string,
   items: ParsedItem[],
-): Promise<number> {
-  if (items.length === 0) return 0;
+): Promise<{ count: number; titles: string[] }> {
+  if (items.length === 0) return { count: 0, titles: [] };
 
   // Clés déjà présentes pour ce Feed (borné par le nombre d'articles du flux).
   // Le Set sert aussi de garde de dédup interne au flux : on y ajoute les clés
@@ -534,7 +547,7 @@ async function upsertNewArticles(
     seen.add(key);
     fresh.push({ item, key });
   }
-  if (fresh.length === 0) return 0;
+  if (fresh.length === 0) return { count: 0, titles: [] };
 
   const now = sqlUtcNow();
   const buildRow = async ({ item, key }: { item: ParsedItem; key: string }) => {
@@ -568,17 +581,20 @@ async function upsertNewArticles(
   }
 
   // onConflictDoNothing sur (feed_id, article_key) : idempotent et sans reset du
-  // Read d'un Article existant. `returning` compte les insertions réelles.
+  // Read d'un Article existant. `returning` compte les insertions réelles et
+  // remonte leurs titres (net-new) pour la notification push (#80).
   let count = 0;
+  const titles: string[] = [];
   for (const group of chunk(rows, INSERT_CHUNK)) {
     const result = await db
       .insert(articles)
       .values(group)
       .onConflictDoNothing()
-      .returning({ id: articles.id });
+      .returning({ id: articles.id, title: articles.title });
     count += result.length;
+    for (const row of result) if (row.title) titles.push(row.title);
   }
-  return count;
+  return { count, titles };
 }
 
 /**

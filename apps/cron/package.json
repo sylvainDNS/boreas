@@ -8,7 +8,9 @@
     "build": "wrangler deploy --dry-run --config wrangler.jsonc"
   },
   "dependencies": {
-    "@boreas/shared": "workspace:*"
+    "@boreas/api-contracts": "workspace:*",
+    "@boreas/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.10",

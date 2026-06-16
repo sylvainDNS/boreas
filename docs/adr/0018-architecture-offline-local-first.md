@@ -106,6 +106,10 @@ revalide ; un `401` → `/login`, l'outbox étant conservée à travers la ré-a
   serveur, le GC local du contenu Read-non-Saved, et `storage.persist()`.
 - **iOS** : pas de Background/Periodic Sync, push seulement si installée → sync au premier plan
   uniquement ; **non testé**.
+- **Trappe de secours manuelle** (Réglages, « Forcer une resynchronisation ») : sœur déclenchée
+  par l'utilisateur du wipe-resync auto sur curseur périmé, mais plus radicale (`deleteReplica` +
+  réouverture vierge, robuste si la base est coincée) et avec **perte assumée de l'outbox** (les
+  mutations Read/Saved non poussées partent au vidage). Désactivée hors-ligne.
 - **CONTEXT.md inchangé** : aucun nouveau terme de domaine (le corpus offline est dérivé de
   `unread ∪ saved` ; « Read » garde son sens domaine, seul son mécanisme change). Le glossaire
   reste neutre vis-à-vis de l'implémentation.

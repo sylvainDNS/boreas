@@ -101,6 +101,32 @@ describe("parseFeed — encodages", () => {
   });
 });
 
+describe("parseFeed — entités HTML (flux WordPress)", () => {
+  // fast-xml-parser ne décode que les 5 entités XML standard : ni les
+  // références numériques (&#8217;) ni les entités nommées HTML (&eacute;).
+  // On les décode désormais sur titre + résumé, comme le corps via linkedom.
+  it("décode les références numériques des titres (&#8217;, &#038;)", () => {
+    const feed = parseFeed(bytes("rss-entities.xml"));
+    const item = nth(feed, 0);
+    expect(item.title).toBe(
+      "BCN et BPF : Haute-Garonne & Tarn — il n’y a plus",
+    );
+    expect(item.title).not.toMatch(/&[#a-z0-9]+;/i);
+  });
+
+  it("décode les entités nommées HTML des résumés (&rsquo;, &eacute;)", () => {
+    const feed = parseFeed(bytes("rss-entities.xml"));
+    const item = nth(feed, 0);
+    expect(item.summary).toBe("Cet article qu’on adore : un café bien serré.");
+    expect(item.summary).not.toMatch(/&[#a-z0-9]+;/i);
+  });
+
+  it("décode aussi les entités du titre de flux", () => {
+    const feed = parseFeed(bytes("rss-entities.xml"));
+    expect(feed.title).toBe("Café & Vélo");
+  });
+});
+
 describe("parseFeed — dates", () => {
   it("publishedAt null quand la date est absente", () => {
     const item = nth(parseFeed(bytes("rss-no-date.xml")), 0);

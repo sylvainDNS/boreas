@@ -227,8 +227,11 @@ type EmbedReconstructor = (
  * Étendre ce registre (`TwitterToDOM`, etc.) pour couvrir d'autres `…ToDOM`.
  */
 const SUBSTACK_EMBEDS: Record<string, EmbedReconstructor> = {
-  // `InstagramToDOM` : média réhébergé par Substack dans `thumbnail_url`
-  // (proxifiable `/api/img`, ADR 0009), enveloppé d'un lien vers le post.
+  // `InstagramToDOM` : embed reconstruit en image cliquable vers le post.
+  // `thumbnail_url` (présence exigée = embed bien résolu par Substack) est
+  // l'og:image **recadrée** (zoom 1:1) ; on lui préfère l'endpoint média du post
+  // `/p/{id}/media/?size=l`, qui sert l'image **pleine** (proxifié `/api/img`,
+  // ADR 0009, qui suit la redirection vers le CDN à chaque requête).
   InstagramToDOM: (attrs, document) => {
     const id = attrs.instagram_id;
     const thumb = attrs.thumbnail_url;
@@ -242,7 +245,7 @@ const SUBSTACK_EMBEDS: Record<string, EmbedReconstructor> = {
     const a = document.createElement("a");
     a.setAttribute("href", `https://www.instagram.com/p/${id}/`);
     const img = document.createElement("img");
-    img.setAttribute("src", thumb);
+    img.setAttribute("src", `https://www.instagram.com/p/${id}/media/?size=l`);
     const alt = title || author;
     if (alt) img.setAttribute("alt", alt);
     if (title) img.setAttribute("title", title);

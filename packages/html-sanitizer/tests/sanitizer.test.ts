@@ -204,9 +204,10 @@ describe("sanitizeHtml", () => {
     expect(sanitizeHtml("   \n  ", { signImageSrc })).toBe("");
   });
 
-  it("reconstruit un embed Instagram (InstagramToDOM) en lien + image proxifiée", () => {
+  it("reconstruit un embed Instagram (InstagramToDOM) en lien + image pleine proxifiée", () => {
     // data-attrs réaliste observé sur datenow-75 (#96). Quotes JSON via attribut
-    // en simple-quote pour rester du HTML valide.
+    // en simple-quote pour rester du HTML valide. L'image affichée vient de
+    // l'endpoint média du post (image pleine), pas de la thumbnail recadrée.
     const thumb =
       "https://substack-post-media.s3.amazonaws.com/public/images/__ss-rehost__IG-meta-DVwle3zjQXZ.jpg";
     const out = sanitizeHtml(
@@ -215,7 +216,13 @@ describe("sanitizeHtml", () => {
     );
     expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
     expect(out).toContain("/api/img?u=");
-    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain(
+      encodeURIComponent(
+        "https://www.instagram.com/p/DVwle3zjQXZ/media/?size=l",
+      ),
+    );
+    // La thumbnail recadrée n'est plus utilisée comme source d'image.
+    expect(out).not.toContain(encodeURIComponent(thumb));
     expect(out).toContain('title="/dev/girl on Instagram"');
     expect(out).toContain('alt="/dev/girl on Instagram"');
     expect(out).toContain('target="_blank"');
@@ -233,7 +240,11 @@ describe("sanitizeHtml", () => {
       { signImageSrc },
     );
     expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
-    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain(
+      encodeURIComponent(
+        "https://www.instagram.com/p/DVwle3zjQXZ/media/?size=l",
+      ),
+    );
     expect(out).toContain('alt="Hello"');
   });
 

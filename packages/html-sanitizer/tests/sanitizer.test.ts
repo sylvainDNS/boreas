@@ -75,14 +75,75 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("/api/img");
   });
 
-  it("retire iframe et neutralise une tentative d'évasion de body", () => {
+  it("retire un iframe d'hôte non autorisé et neutralise une évasion de body", () => {
     const out = sanitizeHtml(
-      `<p>ok</p></body></html><iframe src="https://evil"></iframe><script>e()</script>`,
+      `<p>ok</p></body></html><iframe src="https://evil.com/embed"></iframe><script>e()</script>`,
       { signImageSrc },
     );
     expect(out).toContain("<p>ok</p>");
     expect(out).not.toContain("<iframe");
     expect(out).not.toContain("<script");
+  });
+
+  it("conserve un iframe YouTube (nocookie) avec ses attributs de rendu", () => {
+    const out = sanitizeHtml(
+      `<iframe src="https://www.youtube-nocookie.com/embed/abc123" width="560" height="315" allowfullscreen allow="encrypted-media; picture-in-picture"></iframe>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("<iframe");
+    expect(out).toContain("https://www.youtube-nocookie.com/embed/abc123");
+    expect(out).toContain("allowfullscreen");
+    expect(out).toContain("allow=");
+    expect(out).toContain('width="560"');
+  });
+
+  it("conserve les iframes youtube.com et player.vimeo.com", () => {
+    const yt = sanitizeHtml(
+      `<iframe src="https://www.youtube.com/embed/xyz"></iframe>`,
+      { signImageSrc },
+    );
+    expect(yt).toContain("https://www.youtube.com/embed/xyz");
+    const vimeo = sanitizeHtml(
+      `<iframe src="https://player.vimeo.com/video/12345"></iframe>`,
+      { signImageSrc },
+    );
+    expect(vimeo).toContain("https://player.vimeo.com/video/12345");
+  });
+
+  it("retire un iframe look-alike (evil-youtube.com)", () => {
+    const out = sanitizeHtml(
+      `<iframe src="https://evil-youtube.com/embed/abc"></iframe>`,
+      { signImageSrc },
+    );
+    expect(out).not.toContain("<iframe");
+    expect(out).not.toContain("evil-youtube.com");
+  });
+
+  it("retire un iframe d'hôte autorisé mais en http (durci https)", () => {
+    const out = sanitizeHtml(
+      `<iframe src="http://www.youtube.com/embed/abc"></iframe>`,
+      { signImageSrc },
+    );
+    expect(out).not.toContain("<iframe");
+  });
+
+  it("retire un iframe au src relatif ou non absolu", () => {
+    const out = sanitizeHtml(`<iframe src="/embed/abc"></iframe>`, {
+      baseUrl: "https://magazine.example/article",
+      signImageSrc,
+    });
+    expect(out).not.toContain("<iframe");
+  });
+
+  it("conserve un iframe autorisé en retirant onload et srcdoc", () => {
+    const out = sanitizeHtml(
+      `<iframe src="https://player.vimeo.com/video/42" onload="steal()" srcdoc="<script>x()</script>"></iframe>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("https://player.vimeo.com/video/42");
+    expect(out).not.toContain("onload");
+    expect(out).not.toContain("srcdoc");
+    expect(out).not.toContain("steal");
   });
 
   it("préserve le contenu structurel courant d'un article", () => {

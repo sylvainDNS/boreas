@@ -30,6 +30,7 @@ const ALLOWED_TAGS = [
   "dd",
   "a",
   "img",
+  "iframe",
   "figure",
   "figcaption",
   "blockquote",
@@ -61,8 +62,27 @@ const ALLOWED_TAGS = [
   "colgroup",
 ];
 
-/** Attributs conservés ; `target`/`rel` sont posés par le hook après coup. */
-const ALLOWED_ATTR = ["href", "src", "alt", "title", "colspan", "rowspan"];
+/**
+ * Attributs conservés ; `target`/`rel` sont posés par le hook après coup.
+ * `width`/`height`/`allowfullscreen`/`allow`/`frameborder`/`loading` servent
+ * surtout au rendu des `<iframe>` vidéo (l'allowlist est globale, c'est la seule
+ * voie : ces attributs sont déjà retirés quand le hook s'exécute). `srcdoc` reste
+ * volontairement absent (exécution de HTML inline dans l'iframe).
+ */
+const ALLOWED_ATTR = [
+  "href",
+  "src",
+  "alt",
+  "title",
+  "colspan",
+  "rowspan",
+  "width",
+  "height",
+  "allowfullscreen",
+  "allow",
+  "frameborder",
+  "loading",
+];
 
 /** Surface d'élément minimale utilisée par le hook (linkedom fournit l'impl). */
 interface ElementLike {
@@ -71,7 +91,19 @@ interface ElementLike {
   getAttribute(name: string): string | null;
   setAttribute(name: string, value: string): void;
   removeAttribute(name: string): void;
+  remove(): void;
 }
+
+/**
+ * Hôtes d'iframe vidéo de confiance (ADR 0007). Tout `<iframe>` dont le `src`
+ * ne pointe pas vers l'un d'eux (en https) est retiré : un iframe arbitraire
+ * ouvrirait clickjacking / exfiltration, et aucune CSP ne couvre le SPA.
+ */
+const ALLOWED_IFRAME_HOSTS = [
+  "youtube-nocookie.com",
+  "youtube.com",
+  "player.vimeo.com",
+];
 
 /** Constantes NodeFilter (linkedom ne les expose pas, DOMPurify les attend). */
 const NODE_FILTER = {
@@ -180,7 +212,8 @@ function unwrapPictures(html: string): string {
  * schémas dangereux (`javascript:`…). En amont, chaque `<picture>` est déplié
  * en son `<img>` fallback (cf. `unwrapPictures`). Un hook réécrit en plus :
  * - les `src` d'images http(s) vers le proxy signé (ADR 0009) ;
- * - les liens en `target="_blank"` + `rel="noopener noreferrer"`.
+ * - les liens en `target="_blank"` + `rel="noopener noreferrer"` ;
+ * - retire les `<iframe>` hors de l'allowlist d'hôtes vidéo (`ALLOWED_IFRAME_HOSTS`).
  *
  * Les hooks sont réinstallés à chaque appel (capture de `opts`). `sanitize`
  * étant synchrone de bout en bout, aucun entrelacement n'est possible.
@@ -223,6 +256,15 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
       el.setAttribute("target", "_blank");
       el.setAttribute("rel", "noopener noreferrer");
     }
+
+    // iframe conservé seulement si son src est un embed https d'un hôte vidéo
+    // de confiance ; sinon retiré en entier (pas juste le src).
+    if (
+      tag === "IFRAME" &&
+      !isAllowedVideoIframe(el.getAttribute("src") ?? "")
+    ) {
+      el.remove();
+    }
   });
 
   const clean = purifier.sanitize(input, {
@@ -245,4 +287,21 @@ function resolveUrl(src: string, baseUrl?: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Vrai si `src` est un embed **https absolu** sur un hôte de `ALLOWED_IFRAME_HOSTS`.
+ * Le `endsWith("." + h)` accepte les sous-domaines (`www.youtube.com`) sans laisser
+ * passer un look-alike (`evil-youtube.com` n'a pas le point séparateur).
+ */
+function isAllowedVideoIframe(src: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(src);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  return ALLOWED_IFRAME_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
 }

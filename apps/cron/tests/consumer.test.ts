@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
-import { getDb, type IngestResult } from "@boreas/shared";
+import type { BackfillResult, IngestResult } from "@boreas/shared";
+import { getDb } from "@boreas/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AckableMessage,
@@ -22,6 +23,19 @@ function ingestResult(overrides: Partial<IngestResult> = {}): IngestResult {
     itemCount: 0,
     title: null,
     consecutiveFailures: 0,
+    ...overrides,
+  };
+}
+
+/** Résultat de backfill réussi par défaut, surchargé au cas par cas. */
+function backfillResult(
+  overrides: Partial<BackfillResult> = {},
+): BackfillResult {
+  return {
+    feedId: "feed-1",
+    status: "updated",
+    rewritten: 0,
+    itemCount: 0,
     ...overrides,
   };
 }
@@ -93,8 +107,8 @@ describe("processIngestionBatch", () => {
     expect(messages[0]?.ack).toHaveBeenCalledTimes(1);
     expect(messages[1]?.ack).toHaveBeenCalledTimes(1);
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[cron:queue] ingestion a levé"),
-      "feed-1",
+      expect.stringContaining("[cron:queue] traitement a levé"),
+      expect.objectContaining({ feedId: "feed-1" }),
       expect.any(Error),
     );
     errorSpy.mockRestore();
@@ -177,6 +191,81 @@ describe("processIngestionBatch", () => {
       expect.stringContaining("[cron:queue] notification push a levé"),
       "feed-1",
       expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("route un message mode:backfill vers deps.backfill, jamais vers ingest ni notify (#97)", async () => {
+    const ingest = vi.fn(async (feedId: string) => ingestResult({ feedId }));
+    const backfill = vi.fn(async (feedId: string) =>
+      backfillResult({ feedId, rewritten: 3 }),
+    );
+    const notify = vi.fn(async () => {});
+
+    const message = makeMessage({
+      feedId: "feed-1",
+      mode: "backfill" as const,
+    });
+    await processIngestionBatch([message], { ingest, backfill, notify });
+
+    expect(backfill).toHaveBeenCalledTimes(1);
+    expect(backfill).toHaveBeenCalledWith("feed-1");
+    expect(ingest).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledTimes(1);
+  });
+
+  it("route un message sans mode vers l'ingestion (rétro-compat) (#97)", async () => {
+    const ingest = vi.fn(async (feedId: string) => ingestResult({ feedId }));
+    const backfill = vi.fn(async (feedId: string) =>
+      backfillResult({ feedId }),
+    );
+
+    await processIngestionBatch([makeMessage({ feedId: "feed-1" })], {
+      ingest,
+      backfill,
+    });
+
+    expect(ingest).toHaveBeenCalledTimes(1);
+    expect(backfill).not.toHaveBeenCalled();
+  });
+
+  it("ack un message backfill sans deps.backfill mais logue l'absence de handler (#97)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ingest = vi.fn(async (feedId: string) => ingestResult({ feedId }));
+    const message = makeMessage({
+      feedId: "feed-1",
+      mode: "backfill" as const,
+    });
+
+    await processIngestionBatch([message], { ingest });
+
+    expect(ingest).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("sans handler backfill"),
+      "feed-1",
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("ack tout de même un message backfill en erreur, et le logue (#97)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ingest = vi.fn(async (feedId: string) => ingestResult({ feedId }));
+    const backfill = vi.fn(async (feedId: string) =>
+      backfillResult({ feedId, status: "error", error: "feed_not_found" }),
+    );
+    const message = makeMessage({
+      feedId: "feed-1",
+      mode: "backfill" as const,
+    });
+
+    await processIngestionBatch([message], { ingest, backfill });
+
+    expect(message.ack).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[cron:queue] backfill en erreur"),
+      expect.objectContaining({ feedId: "feed-1", error: "feed_not_found" }),
     );
     errorSpy.mockRestore();
   });

@@ -197,6 +197,87 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("srcset");
   });
 
+  it("ne plante pas et renvoie une chaîne vide sur une entrée vide", () => {
+    // DOMPurify sur linkedom plante sur entrée vide ; un article réduit à un
+    // embed non reconstructible se vide après la pré-passe (#96).
+    expect(sanitizeHtml("", { signImageSrc })).toBe("");
+    expect(sanitizeHtml("   \n  ", { signImageSrc })).toBe("");
+  });
+
+  it("reconstruit un embed Instagram (InstagramToDOM) en lien + image proxifiée", () => {
+    // data-attrs réaliste observé sur datenow-75 (#96). Quotes JSON via attribut
+    // en simple-quote pour rester du HTML valide.
+    const thumb =
+      "https://substack-post-media.s3.amazonaws.com/public/images/__ss-rehost__IG-meta-DVwle3zjQXZ.jpg";
+    const out = sanitizeHtml(
+      `<div data-component-name="InstagramToDOM" data-attrs='{"instagram_id":"DVwle3zjQXZ","author_name":"@devgirl___","thumbnail_url":"${thumb}","title":"/dev/girl on Instagram"}'></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
+    expect(out).toContain("/api/img?u=");
+    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain('title="/dev/girl on Instagram"');
+    expect(out).toContain('alt="/dev/girl on Instagram"');
+    expect(out).toContain('target="_blank"');
+    expect(out).not.toContain("data-component-name");
+    expect(out).not.toContain("data-attrs");
+  });
+
+  it("reconstruit un InstagramToDOM dont les data-attrs sont encodés en entités", () => {
+    // Forme réelle livrée par Substack dans content:encoded : le JSON est encodé
+    // en entités HTML (`&quot;`). linkedom les décode via getAttribute (#96).
+    const thumb =
+      "https://substack-post-media.s3.amazonaws.com/public/images/IG-meta.jpg";
+    const out = sanitizeHtml(
+      `<div data-component-name="InstagramToDOM" data-attrs="{&quot;instagram_id&quot;:&quot;DVwle3zjQXZ&quot;,&quot;thumbnail_url&quot;:&quot;${thumb}&quot;,&quot;title&quot;:&quot;Hello&quot;}"></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
+    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain('alt="Hello"');
+  });
+
+  it("retire un InstagramToDOM au data-attrs JSON invalide", () => {
+    const out = sanitizeHtml(
+      `<p>ok</p><div data-component-name="InstagramToDOM" data-attrs="{pas du json}"></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("<p>ok</p>");
+    expect(out).not.toContain("<a");
+    expect(out).not.toContain("data-component-name");
+  });
+
+  it("retire un InstagramToDOM sans thumbnail_url (non reconstructible)", () => {
+    const out = sanitizeHtml(
+      `<div data-component-name="InstagramToDOM" data-attrs='{"instagram_id":"abc"}'></div>`,
+      { signImageSrc },
+    );
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("<a");
+    expect(out).not.toContain("data-component-name");
+  });
+
+  it("retire un …ToDOM non géré même porteur de contenu", () => {
+    const out = sanitizeHtml(
+      `<p>avant</p><div data-component-name="TwitterToDOM" data-attrs="{}">tweet brut</div><p>après</p>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("avant");
+    expect(out).toContain("après");
+    expect(out).not.toContain("tweet brut");
+    expect(out).not.toContain("data-component-name");
+  });
+
+  it("laisse un div[data-component-name] non-ToDOM, en retirant ses data-*", () => {
+    const out = sanitizeHtml(
+      `<div data-component-name="Pullquote" data-attrs="{}"><strong>contenu</strong></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("<strong>contenu</strong>");
+    expect(out).not.toContain("data-component-name");
+    expect(out).not.toContain("data-attrs");
+  });
+
   it("ouvre les liens conservés dans un nouvel onglet en sécurité", () => {
     const out = sanitizeHtml(`<a href="https://exemple.org/page">lien</a>`, {
       signImageSrc,

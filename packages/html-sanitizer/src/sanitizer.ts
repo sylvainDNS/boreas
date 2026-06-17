@@ -206,11 +206,107 @@ function unwrapPictures(html: string): string {
   return document.body.innerHTML;
 }
 
+/** Document linkedom (createElement, querySelectorAll…) tel que renvoyé par `parseHTML`. */
+type LinkedomDocument = ReturnType<typeof parseHTML>["document"];
+
+/** Élément linkedom (le package n'inclut pas la lib DOM : pas de `Node` global). */
+type LinkedomElement = ReturnType<LinkedomDocument["createElement"]>;
+
+/**
+ * Reconstructeur d'embed Substack : transforme les `data-attrs` (JSON non fiable)
+ * d'un `<div data-component-name="…ToDOM">` en un nœud rendu, ou `null` si non
+ * reconstructible (champs manquants/invalides).
+ */
+type EmbedReconstructor = (
+  attrs: Record<string, unknown>,
+  document: LinkedomDocument,
+) => LinkedomElement | null;
+
+/**
+ * Embeds Substack reconstruits avant sanitization (#96). Tracer : Instagram.
+ * Étendre ce registre (`TwitterToDOM`, etc.) pour couvrir d'autres `…ToDOM`.
+ */
+const SUBSTACK_EMBEDS: Record<string, EmbedReconstructor> = {
+  // `InstagramToDOM` : média réhébergé par Substack dans `thumbnail_url`
+  // (proxifiable `/api/img`, ADR 0009), enveloppé d'un lien vers le post.
+  InstagramToDOM: (attrs, document) => {
+    const id = attrs.instagram_id;
+    const thumb = attrs.thumbnail_url;
+    if (typeof id !== "string" || !/^[\w-]+$/.test(id)) return null;
+    if (typeof thumb !== "string" || !isHttpUrl(thumb)) return null;
+
+    const title = typeof attrs.title === "string" ? attrs.title : "";
+    const author =
+      typeof attrs.author_name === "string" ? attrs.author_name : "";
+
+    const a = document.createElement("a");
+    a.setAttribute("href", `https://www.instagram.com/p/${id}/`);
+    const img = document.createElement("img");
+    img.setAttribute("src", thumb);
+    const alt = title || author;
+    if (alt) img.setAttribute("alt", alt);
+    if (title) img.setAttribute("title", title);
+    a.appendChild(img);
+    return a;
+  },
+};
+
+/**
+ * Reconstruit les embeds Substack `…ToDOM` **avant** la passe DOMPurify (#96).
+ * Substack émet certains embeds (Instagram, Twitter/X…) comme des
+ * `<div data-component-name="…ToDOM" data-attrs="{json}">` vides : le média
+ * n'existe que dans le JSON `data-attrs`, hydraté côté client. On lit ce JSON et
+ * on régénère un nœud rendu (Instagram → `<a><img></a>`), qui traverse ensuite le
+ * pipeline (le hook `img` proxifie le `src`, le hook `a` pose `target`/`rel`).
+ *
+ * Tout `…ToDOM` non géré, à JSON invalide ou non reconstructible est retiré
+ * (placeholder hydraté côté client, inutile en RSS). Les `div[data-component-name]`
+ * **ne finissant pas** par `ToDOM` (autres composants Substack porteurs de contenu)
+ * sont laissés tels quels — DOMPurify retirera seulement leurs `data-*` (hors allowlist).
+ *
+ * Garde-fou : parse linkedom seulement si un `data-component-name` est présent.
+ * Les nœuds sont construits via `createElement`/`setAttribute` (jamais d'interpolation
+ * HTML) : les valeurs viennent d'un JSON non fiable.
+ */
+function reconstructSubstackEmbeds(html: string): string {
+  if (!/data-component-name/i.test(html)) return html;
+
+  const { document } = parseHTML(
+    `<!DOCTYPE html><html><head></head><body>${html}</body></html>`,
+  );
+  for (const div of document.querySelectorAll("div[data-component-name]")) {
+    const name = div.getAttribute("data-component-name") ?? "";
+    if (!name.endsWith("ToDOM")) continue;
+
+    let node: LinkedomElement | null = null;
+    const reconstructor = SUBSTACK_EMBEDS[name];
+    if (reconstructor) {
+      try {
+        const attrs = JSON.parse(div.getAttribute("data-attrs") ?? "null");
+        if (attrs && typeof attrs === "object") {
+          node = reconstructor(attrs as Record<string, unknown>, document);
+        }
+      } catch {
+        // data-attrs JSON invalide → non reconstructible (node reste null).
+      }
+    }
+
+    if (node) {
+      div.replaceWith(node);
+    } else {
+      div.remove();
+    }
+  }
+  return document.body.innerHTML;
+}
+
 /**
  * Sanitize du HTML d'article non fiable côté serveur (ADR 0007), sur un DOM
  * `linkedom`. DOMPurify retire `<script>`/`<style>`, les handlers `on*` et les
  * schémas dangereux (`javascript:`…). En amont, chaque `<picture>` est déplié
- * en son `<img>` fallback (cf. `unwrapPictures`). Un hook réécrit en plus :
+ * en son `<img>` fallback (cf. `unwrapPictures`) et les embeds Substack `…ToDOM`
+ * sont reconstruits depuis leurs `data-attrs` (cf. `reconstructSubstackEmbeds`).
+ * Un hook réécrit en plus :
  * - les `src` d'images http(s) vers le proxy signé (ADR 0009) ;
  * - les liens en `target="_blank"` + `rel="noopener noreferrer"` ;
  * - retire les `<iframe>` hors de l'allowlist d'hôtes vidéo (`ALLOWED_IFRAME_HOSTS`).
@@ -231,7 +327,14 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
   // Le `(?:-->|$)` couvre aussi un commentaire non fermé (flux mal formé, repli
   // HTML brut de `extractArticle`) : sans fin, le parseur l'étend jusqu'à l'EOF,
   // on fait pareil — sinon le nœud commentaire subsiste et le crash revient.
-  const input = unwrapPictures(html.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
+  const input = reconstructSubstackEmbeds(
+    unwrapPictures(html.replace(/<!--[\s\S]*?(?:-->|$)/g, "")),
+  );
+
+  // DOMPurify sur linkedom 0.18.12 plante (Comment.remove, même famille que
+  // #6/#7) sur une entrée vide. La reconstruction d'embeds peut vider le contenu
+  // (article réduit à un placeholder non reconstructible) → on court-circuite.
+  if (input.trim() === "") return "";
 
   purifier.removeAllHooks();
   purifier.addHook("afterSanitizeAttributes", (node) => {
@@ -272,6 +375,10 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
     ALLOWED_ATTR,
     // Conserve le contenu textuel des balises retirées (ex. <span> non listé).
     KEEP_CONTENT: true,
+    // Sans ça, DOMPurify laisse passer **tous** les `data-*` (défaut `true`),
+    // court-circuitant l'allowlist stricte : les `data-attrs` des placeholders
+    // Substack pollueraient la sortie (#96).
+    ALLOW_DATA_ATTR: false,
   });
 
   return typeof clean === "string" ? clean : String(clean);
@@ -286,6 +393,16 @@ function resolveUrl(src: string, baseUrl?: string): string | null {
     return baseUrl ? new URL(src, baseUrl).href : new URL(src).href;
   } catch {
     return null;
+  }
+}
+
+/** Vrai si `value` est une URL http(s) absolue (valide un `thumbnail_url` reconstruit). */
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
   }
 }
 

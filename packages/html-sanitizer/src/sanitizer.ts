@@ -249,24 +249,80 @@ const SUBSTACK_EMBEDS: Record<string, EmbedReconstructor> = {
     a.appendChild(img);
     return a;
   },
+
+  // `Twitter2ToDOM` (X) : le tweet n'est que dans `data-attrs` (texte, auteur,
+  // lien, photos réhébergées Substack). On régénère une carte avec des balises de
+  // l'allowlist uniquement (les `class` seraient retirées par DOMPurify) ; le hook
+  // `img` proxifie les photos, le hook `a` pose `target`/`rel`.
+  Twitter2ToDOM: (attrs, document) => {
+    const url = attrs.url;
+    if (typeof url !== "string" || !isHttpUrl(url)) return null;
+
+    const text = typeof attrs.full_text === "string" ? attrs.full_text : "";
+    const name = typeof attrs.name === "string" ? attrs.name : "";
+    const username = typeof attrs.username === "string" ? attrs.username : "";
+
+    const card = document.createElement("blockquote");
+    if (text) {
+      const p = document.createElement("p");
+      p.appendChild(document.createTextNode(text));
+      card.appendChild(p);
+    }
+    if (name || username) {
+      const byline = document.createElement("p");
+      const label = username ? `${name} (@${username})`.trim() : name;
+      byline.appendChild(document.createTextNode(`— ${label}`));
+      card.appendChild(byline);
+    }
+    // Photos jointes (réhébergées Substack → proxifiables /api/img).
+    if (Array.isArray(attrs.photos)) {
+      for (const photo of attrs.photos) {
+        const p = photo as Record<string, unknown> | null;
+        const imgUrl = p?.img_url;
+        if (typeof imgUrl !== "string" || !isHttpUrl(imgUrl)) continue;
+        const linkUrl = p?.link_url;
+        const a = document.createElement("a");
+        a.setAttribute(
+          "href",
+          typeof linkUrl === "string" && isHttpUrl(linkUrl) ? linkUrl : url,
+        );
+        const img = document.createElement("img");
+        img.setAttribute("src", imgUrl);
+        a.appendChild(img);
+        card.appendChild(a);
+      }
+    }
+    const source = document.createElement("a");
+    source.setAttribute("href", url);
+    source.appendChild(document.createTextNode("Voir sur X"));
+    card.appendChild(source);
+    return card;
+  },
 };
 
 /**
  * Reconstruit les embeds Substack `…ToDOM` **avant** la passe DOMPurify (#96).
- * Substack émet certains embeds (Instagram, Twitter/X…) comme des
- * `<div data-component-name="…ToDOM" data-attrs="{json}">` vides : le média
- * n'existe que dans le JSON `data-attrs`, hydraté côté client. On lit ce JSON et
- * on régénère un nœud rendu (Instagram → `<a><img></a>`), qui traverse ensuite le
- * pipeline (le hook `img` proxifie le `src`, le hook `a` pose `target`/`rel`).
+ * Substack enveloppe chaque embed dans un `<div data-component-name="…ToDOM"
+ * data-attrs="{json}">`. Deux cas :
+ * - **wrapper vide** (le média n'est que dans `data-attrs`, hydraté côté client :
+ *   Instagram, Twitter/X) → on lit le JSON et on régénère un nœud rendu
+ *   (Instagram → `<a><img>`, Twitter → carte `<blockquote>`), qui traverse ensuite
+ *   le pipeline (hook `img` = proxy du `src`, hook `a` = `target`/`rel`) ;
+ * - **wrapper portant déjà le rendu serveur** (Youtube2ToDOM → `<iframe>`,
+ *   Image2ToDOM → `<picture>`) → aucun reconstructeur, mais on **déplie** le div
+ *   (on le remplace par ses enfants) au lieu de le supprimer : sinon l'iframe/le
+ *   picture embarqués seraient jetés avant que l'allowlist d'hôtes iframe (#94) et
+ *   le dépliage `<picture>` (#95) ne les traitent (#97/régression observée sur
+ *   datenow-75). Un wrapper réellement vide se déplie en rien = retiré.
  *
- * Tout `…ToDOM` non géré, à JSON invalide ou non reconstructible est retiré
- * (placeholder hydraté côté client, inutile en RSS). Les `div[data-component-name]`
- * **ne finissant pas** par `ToDOM` (autres composants Substack porteurs de contenu)
- * sont laissés tels quels — DOMPurify retirera seulement leurs `data-*` (hors allowlist).
+ * Les `div[data-component-name]` **ne finissant pas** par `ToDOM` (autres composants
+ * Substack porteurs de contenu) sont laissés tels quels — DOMPurify retirera seulement
+ * leurs `data-*` (hors allowlist).
  *
  * Garde-fou : parse linkedom seulement si un `data-component-name` est présent.
- * Les nœuds sont construits via `createElement`/`setAttribute` (jamais d'interpolation
- * HTML) : les valeurs viennent d'un JSON non fiable.
+ * Les nœuds reconstruits sont construits via `createElement`/`setAttribute`/
+ * `createTextNode` (jamais d'interpolation HTML) : les valeurs viennent d'un JSON
+ * non fiable. Le dépliage n'introduit aucun contenu neuf : tout repasse par DOMPurify.
  */
 function reconstructSubstackEmbeds(html: string): string {
   if (!/data-component-name/i.test(html)) return html;
@@ -292,9 +348,13 @@ function reconstructSubstackEmbeds(html: string): string {
     }
 
     if (node) {
+      // Placeholder vide reconstruit (Instagram, Twitter) → on substitue le rendu.
       div.replaceWith(node);
     } else {
-      div.remove();
+      // Pas de reconstruction : on déplie le wrapper pour préserver le rendu
+      // serveur embarqué (iframe, picture). `childNodes` est live → matérialiser
+      // avant de remplacer. Un wrapper vide se déplie en rien (= retrait).
+      div.replaceWith(...Array.from(div.childNodes));
     }
   }
   return document.body.innerHTML;
@@ -327,8 +387,19 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
   // Le `(?:-->|$)` couvre aussi un commentaire non fermé (flux mal formé, repli
   // HTML brut de `extractArticle`) : sans fin, le parseur l'étend jusqu'à l'EOF,
   // on fait pareil — sinon le nœud commentaire subsiste et le crash revient.
+  //
+  // Même famille de bug pour les `<svg>` inline : DOMPurify sur linkedom, en les
+  // retirant (svg hors allowlist), **vide tout le sous-arbre voisin** au lieu du
+  // seul svg — sur Substack, les contrôles zoom `<button><svg>…</svg></button>`
+  // d'un `Image2ToDOM` emportaient ainsi l'image de l'article. On retire les svg
+  // en amont : jamais conservés en sortie de toute façon, donc sans perte, mais
+  // sans l'effacement collatéral.
   const input = reconstructSubstackEmbeds(
-    unwrapPictures(html.replace(/<!--[\s\S]*?(?:-->|$)/g, "")),
+    unwrapPictures(
+      html
+        .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+        .replace(/<svg[\s\S]*?<\/svg>/gi, ""),
+    ),
   );
 
   // DOMPurify sur linkedom 0.18.12 plante (Comment.remove, même famille que

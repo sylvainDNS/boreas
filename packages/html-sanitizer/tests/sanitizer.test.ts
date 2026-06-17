@@ -204,9 +204,10 @@ describe("sanitizeHtml", () => {
     expect(sanitizeHtml("   \n  ", { signImageSrc })).toBe("");
   });
 
-  it("reconstruit un embed Instagram (InstagramToDOM) en lien + image proxifiée", () => {
+  it("reconstruit un embed Instagram (InstagramToDOM) en lien + image pleine proxifiée", () => {
     // data-attrs réaliste observé sur datenow-75 (#96). Quotes JSON via attribut
-    // en simple-quote pour rester du HTML valide.
+    // en simple-quote pour rester du HTML valide. L'image affichée vient de
+    // l'endpoint média du post (image pleine), pas de la thumbnail recadrée.
     const thumb =
       "https://substack-post-media.s3.amazonaws.com/public/images/__ss-rehost__IG-meta-DVwle3zjQXZ.jpg";
     const out = sanitizeHtml(
@@ -215,7 +216,13 @@ describe("sanitizeHtml", () => {
     );
     expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
     expect(out).toContain("/api/img?u=");
-    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain(
+      encodeURIComponent(
+        "https://www.instagram.com/p/DVwle3zjQXZ/media/?size=l",
+      ),
+    );
+    // La thumbnail recadrée n'est plus utilisée comme source d'image.
+    expect(out).not.toContain(encodeURIComponent(thumb));
     expect(out).toContain('title="/dev/girl on Instagram"');
     expect(out).toContain('alt="/dev/girl on Instagram"');
     expect(out).toContain('target="_blank"');
@@ -233,7 +240,11 @@ describe("sanitizeHtml", () => {
       { signImageSrc },
     );
     expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
-    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain(
+      encodeURIComponent(
+        "https://www.instagram.com/p/DVwle3zjQXZ/media/?size=l",
+      ),
+    );
     expect(out).toContain('alt="Hello"');
   });
 
@@ -257,14 +268,84 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("data-component-name");
   });
 
-  it("retire un …ToDOM non géré même porteur de contenu", () => {
+  it("déplie un …ToDOM non géré porteur d'un <iframe> vidéo embarqué (Youtube2ToDOM)", () => {
+    // Substack enveloppe l'embed YouTube dans un Youtube2ToDOM qui CONTIENT le
+    // vrai <iframe> ; le supprimer en bloc jetait l'iframe avant l'allowlist #94
+    // (régression observée sur datenow-75). On déplie pour le préserver.
     const out = sanitizeHtml(
-      `<p>avant</p><div data-component-name="TwitterToDOM" data-attrs="{}">tweet brut</div><p>après</p>`,
+      `<div data-component-name="Youtube2ToDOM" data-attrs="{}"><div class="youtube-inner"><iframe src="https://www.youtube-nocookie.com/embed/abc123" allowfullscreen></iframe></div></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("<iframe");
+    expect(out).toContain("https://www.youtube-nocookie.com/embed/abc123");
+    expect(out).not.toContain("data-component-name");
+    expect(out).not.toContain("data-attrs");
+  });
+
+  it("déplie un Image2ToDOM porteur d'un <picture>, conservé en <img> proxifié", () => {
+    const out = sanitizeHtml(
+      `<div data-component-name="Image2ToDOM" data-attrs="{}"><picture><source srcset="https://src.example/x.webp" /><img src="https://src.example/x.jpg" alt="A" /></picture></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("/api/img?u=");
+    expect(out).toContain(encodeURIComponent("https://src.example/x.jpg"));
+    expect(out).toContain('alt="A"');
+    expect(out).not.toContain("<picture");
+    expect(out).not.toContain("data-component-name");
+  });
+
+  it("conserve une image voisine d'un <svg> inline (contrôles zoom Substack)", () => {
+    // Régression réelle (datenow-75) : l'image de l'article (dans un <a
+    // Image2ToDOM>) côtoie des <button><svg> de zoom ; DOMPurify sur linkedom,
+    // en retirant le svg, vidait tout le sous-arbre voisin → image perdue. Le
+    // strip des svg en amont doit préserver l'image.
+    const out = sanitizeHtml(
+      `<a href="https://src.example/full.jpg"><div><picture><source srcset="https://src.example/x.webp" /><img src="https://src.example/x.jpg" alt="A" /></picture><div><button><svg viewBox="0 0 24 24"><path d="M21 21l-6-6" /></svg></button><button><svg><polyline points="9 21 3 21" /><line x1="21" x2="14" y1="3" y2="10" /></svg></button></div></div></a>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("/api/img?u=");
+    expect(out).toContain(encodeURIComponent("https://src.example/x.jpg"));
+    expect(out).not.toContain("<svg");
+    expect(out).not.toContain("<button");
+  });
+
+  it("retire un …ToDOM non géré et vide (placeholder hydraté côté client)", () => {
+    // Sans rendu embarqué, le dépliage ne laisse rien → équivaut à un retrait.
+    const out = sanitizeHtml(
+      `<p>avant</p><div data-component-name="EmbeddedPostToDOM" data-attrs="{}"></div><p>après</p>`,
       { signImageSrc },
     );
     expect(out).toContain("avant");
     expect(out).toContain("après");
-    expect(out).not.toContain("tweet brut");
+    expect(out).not.toContain("data-component-name");
+  });
+
+  it("reconstruit un embed Twitter (Twitter2ToDOM) en carte texte + lien + photo proxifiée", () => {
+    // data-attrs réaliste observé sur datenow-75 (le tweet n'est que dans le JSON).
+    const photo = "https://pbs.substack.com/media/HCju164bQAAoPd3.png";
+    const out = sanitizeHtml(
+      `<div data-component-name="Twitter2ToDOM" data-attrs='{"url":"https://x.com/WindowsLatest/status/123","full_text":"Fact check: pas de Windows 12","username":"WindowsLatest","name":"Windows Latest","photos":[{"img_url":"${photo}","link_url":"https://t.co/x"}]}'></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("<blockquote");
+    expect(out).toContain("Fact check: pas de Windows 12");
+    expect(out).toContain("Windows Latest");
+    expect(out).toContain("@WindowsLatest");
+    expect(out).toContain('href="https://x.com/WindowsLatest/status/123"');
+    expect(out).toContain("Voir sur X");
+    expect(out).toContain("/api/img?u=");
+    expect(out).toContain(encodeURIComponent(photo));
+    expect(out).not.toContain("data-component-name");
+    expect(out).not.toContain("data-attrs");
+  });
+
+  it("retire un Twitter2ToDOM sans url (non reconstructible, wrapper vide)", () => {
+    const out = sanitizeHtml(
+      `<p>ok</p><div data-component-name="Twitter2ToDOM" data-attrs='{"full_text":"x"}'></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("<p>ok</p>");
+    expect(out).not.toContain("<blockquote");
     expect(out).not.toContain("data-component-name");
   });
 

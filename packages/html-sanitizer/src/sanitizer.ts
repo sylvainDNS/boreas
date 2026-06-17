@@ -143,9 +143,42 @@ function createSanitizer(): DOMPurify {
 let purifier: DOMPurify | undefined;
 
 /**
+ * Pré-déplie chaque `<picture>` en son `<img>` fallback **avant** la passe
+ * DOMPurify. `picture`/`source` ne sont pas dans l'allowlist : quand DOMPurify
+ * retire le `<picture>`, son `<img>` enfant part avec (le `KEEP_CONTENT` ne
+ * rapatrie pas l'élément sur le DOM linkedom) et l'image est perdue (#95).
+ *
+ * En dépliant ici, l'`<img>` fallback remonte à la place du `<picture>` et
+ * traverse ensuite le pipeline normal (résolution `baseUrl` + proxy signé +
+ * retrait du `srcset` par le hook `img`). Les `<source srcset>` sont écartés :
+ * le proxy ne sert qu'une URL.
+ *
+ * Garde-fou : on ne paie le coût d'un parse linkedom que si un `<picture>` est
+ * présent. Un `<picture>` sans `<img>` fallback est retiré (pas de
+ * reconstruction depuis `srcset`).
+ */
+function unwrapPictures(html: string): string {
+  if (!/<picture[\s>]/i.test(html)) return html;
+
+  const { document } = parseHTML(
+    `<!DOCTYPE html><html><head></head><body>${html}</body></html>`,
+  );
+  for (const picture of document.querySelectorAll("picture")) {
+    const img = picture.querySelector("img");
+    if (img) {
+      picture.replaceWith(img);
+    } else {
+      picture.remove();
+    }
+  }
+  return document.body.innerHTML;
+}
+
+/**
  * Sanitize du HTML d'article non fiable côté serveur (ADR 0007), sur un DOM
  * `linkedom`. DOMPurify retire `<script>`/`<style>`, les handlers `on*` et les
- * schémas dangereux (`javascript:`…). Un hook réécrit en plus :
+ * schémas dangereux (`javascript:`…). En amont, chaque `<picture>` est déplié
+ * en son `<img>` fallback (cf. `unwrapPictures`). Un hook réécrit en plus :
  * - les `src` d'images http(s) vers le proxy signé (ADR 0009) ;
  * - les liens en `target="_blank"` + `rel="noopener noreferrer"`.
  *
@@ -165,7 +198,7 @@ export function sanitizeHtml(html: string, opts: SanitizeOptions): string {
   // Le `(?:-->|$)` couvre aussi un commentaire non fermé (flux mal formé, repli
   // HTML brut de `extractArticle`) : sans fin, le parseur l'étend jusqu'à l'EOF,
   // on fait pareil — sinon le nœud commentaire subsiste et le crash revient.
-  const input = html.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+  const input = unwrapPictures(html.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
 
   purifier.removeAllHooks();
   purifier.addHook("afterSanitizeAttributes", (node) => {

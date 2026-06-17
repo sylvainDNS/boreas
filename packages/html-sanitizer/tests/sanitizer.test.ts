@@ -96,6 +96,46 @@ describe("sanitizeHtml", () => {
     expect(out).toContain("<blockquote>cit</blockquote>");
   });
 
+  it("préserve l'<img> fallback d'un <picture> et le signe, sans <source>/srcset", () => {
+    // Substack livre l'image en <picture><source srcset><img></picture> ; sans
+    // dépliage, DOMPurify retire le <picture> et son <img> part avec (#95).
+    const out = sanitizeHtml(
+      `<picture><source type="image/webp" srcset="https://src.example/x.webp" /><img src="https://src.example/x.jpg" alt="A" /></picture>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("/api/img?u=");
+    expect(out).toContain(encodeURIComponent("https://src.example/x.jpg"));
+    expect(out).toContain('alt="A"');
+    expect(out).not.toContain("<picture");
+    expect(out).not.toContain("<source");
+    expect(out).not.toContain("srcset");
+  });
+
+  it("résout le src relatif d'un <img> en <picture> contre baseUrl", () => {
+    const out = sanitizeHtml(
+      `<picture><source srcset="/photos/a.webp" /><img src="/photos/a.jpg" alt="A" /></picture>`,
+      { baseUrl: "https://magazine.example/article", signImageSrc },
+    );
+    expect(out).toContain(
+      encodeURIComponent("https://magazine.example/photos/a.jpg"),
+    );
+    expect(out).not.toContain("<picture");
+    expect(out).not.toContain("<source");
+  });
+
+  it("retire un <picture> sans <img> fallback", () => {
+    // Pas de reconstruction depuis srcset : le proxy ne sert qu'une URL (#95).
+    const out = sanitizeHtml(
+      `<p>avant</p><picture><source srcset="https://src.example/x.webp" /></picture><p>après</p>`,
+      { signImageSrc },
+    );
+    expect(out).toContain("avant");
+    expect(out).toContain("après");
+    expect(out).not.toContain("<picture");
+    expect(out).not.toContain("<source");
+    expect(out).not.toContain("srcset");
+  });
+
   it("ouvre les liens conservés dans un nouvel onglet en sécurité", () => {
     const out = sanitizeHtml(`<a href="https://exemple.org/page">lien</a>`, {
       signImageSrc,

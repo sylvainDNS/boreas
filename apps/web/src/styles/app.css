@@ -237,6 +237,18 @@
   margin-top: 0.55rem;
 }
 
+/* Iframes vidéo (YouTube/Vimeo, #94) : responsive, ne débordent pas la colonne
+   lecteur (sinon scroll horizontal). Ratio 16:9 (taille des embeds vidéo). */
+.reader-prose iframe {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: var(--radius-card);
+}
+
 /* <pre> brut (chemin de repli dangerouslySetInnerHTML, sans .code-card) :
    scroll horizontal interne pour ne pas élargir la colonne lecteur. */
 .reader-prose pre {

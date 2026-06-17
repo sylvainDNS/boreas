@@ -1,14 +1,19 @@
 import { extractArticle } from "@boreas/content-extractor";
 import { sanitizeHtml } from "@boreas/html-sanitizer";
-import { and, eq, isNull, lte, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, type SQL } from "drizzle-orm";
 import { articleKey } from "./article-identity";
-import { chunk, insertChunkSize, R2_DELETE_CHUNK } from "./batching";
+import {
+  chunk,
+  insertChunkSize,
+  R2_DELETE_CHUNK,
+  whereInChunkSize,
+} from "./batching";
 import { signImageUrl } from "./crypto";
 import type { Db } from "./db";
 import { articles, feeds, settings } from "./db";
 import type { ParsedItem } from "./feed-parser";
 import { parseFeed } from "./feed-parser";
-import { sqlUtcNow } from "./timestamp";
+import { nowEpochMs, sqlUtcNow } from "./timestamp";
 import { writeTombstones } from "./tombstones";
 
 // On dérive la taille de lot d'insertion du nombre de **paramètres liés** posés
@@ -56,6 +61,14 @@ const FETCH_HEADERS = {
 /** Corps d'un message de la Queue d'ingestion : le Feed à ingérer (#10, ADR 0002). */
 export interface IngestionMessage {
   feedId: string;
+  /**
+   * Mode de traitement du message (#97). `undefined`/`"ingest"` = ingestion
+   * normale (poll : net-new → push) ; `"backfill"` = ré-sanitization en place
+   * du contenu des articles déjà stockés (récupération d'embeds, sans net-new
+   * ni notification). Optionnel pour rester rétro-compatible avec les messages
+   * déjà en vol au déploiement (absent ⇒ ingestion).
+   */
+  mode?: "ingest" | "backfill";
 }
 
 /** Issue d'une ingestion d'un Feed (un message de queue / un refresh manuel). */
@@ -103,15 +116,19 @@ const QUEUE_BATCH_MAX = 100;
 
 /**
  * Enqueue un message d'ingestion par Feed, en respectant la limite de 100
- * messages par `sendBatch` (API Queues). Partagé par le refresh global (#10)
- * et le Cron `scheduled` (ADR 0002).
+ * messages par `sendBatch` (API Queues). Partagé par le refresh global (#10),
+ * le Cron `scheduled` (ADR 0002) et le backfill (#97).
+ *
+ * `mode` est porté tel quel dans le corps du message (défaut `"ingest"`) ; le
+ * consommateur route ensuite vers l'ingestion ou le backfill (#97).
  */
 export async function enqueueFeedIds(
   queue: Pick<Queue<IngestionMessage>, "sendBatch">,
   feedIds: string[],
+  mode: IngestionMessage["mode"] = "ingest",
 ): Promise<void> {
   for (const batch of chunk(feedIds, QUEUE_BATCH_MAX)) {
-    await queue.sendBatch(batch.map((feedId) => ({ body: { feedId } })));
+    await queue.sendBatch(batch.map((feedId) => ({ body: { feedId, mode } })));
   }
 }
 
@@ -598,6 +615,40 @@ async function upsertNewArticles(
 }
 
 /**
+ * Extrait (Readability) + sanitize (allow-list, proxy d'images signé) le contenu
+ * HTML d'un item. Renvoie le HTML sûr, ou `null` si le flux ne fournit pas de
+ * contenu ou si l'extraction/sanitization échoue — **ne touche pas R2**. Le
+ * traitement n'est jamais interrompu pour un seul article (try/catch, log).
+ *
+ * Pur (hors I/O R2) : partagé par l'ingestion ({@link extractAndStore}) et le
+ * backfill ({@link backfillFeed}, #97) pour que les règles de sanitization
+ * (#94/#95/#96) ne soient jamais dupliquées entre les deux chemins.
+ */
+function sanitizeArticleContent(
+  secret: string,
+  rawContent: string | null,
+  baseUrl: string | null,
+): string | null {
+  if (!rawContent) return null;
+  try {
+    const extracted = extractArticle(rawContent, baseUrl ?? "");
+    return sanitizeHtml(extracted.content, {
+      baseUrl: baseUrl ?? undefined,
+      signImageSrc: (src) => signImageUrl(secret, src),
+    });
+  } catch (err) {
+    console.error(
+      "[ingestion] extraction/sanitization du contenu échouée",
+      err,
+    );
+    return null;
+  }
+}
+
+/** Clé R2 du HTML plein d'un article (ADR 0003/0007). */
+const articleContentKey = (id: string) => `articles/${id}.html`;
+
+/**
  * Extrait + sanitize le contenu HTML d'un item et le stocke en R2 sous
  * `articles/{id}.html`. Renvoie la clé R2, ou `null` si le flux ne fournit pas
  * de contenu ou en cas d'échec — l'ingestion n'est jamais interrompue pour un
@@ -610,20 +661,179 @@ async function extractAndStore(
   rawContent: string | null,
   baseUrl: string | null,
 ): Promise<string | null> {
-  if (!rawContent) return null;
+  const safe = sanitizeArticleContent(secret, rawContent, baseUrl);
+  if (safe === null) return null;
   try {
-    const extracted = extractArticle(rawContent, baseUrl ?? "");
-    const safe = sanitizeHtml(extracted.content, {
-      baseUrl: baseUrl ?? undefined,
-      signImageSrc: (src) => signImageUrl(secret, src),
-    });
-    const key = `articles/${id}.html`;
+    const key = articleContentKey(id);
     await bucket.put(key, safe, {
       httpMetadata: { contentType: "text/html; charset=utf-8" },
     });
     return key;
   } catch (err) {
-    console.error("[ingestion] extraction/stockage du contenu échoué", err);
+    console.error("[ingestion] stockage R2 du contenu échoué", err);
     return null;
   }
+}
+
+/** Issue d'un backfill d'un Feed (un message de queue `mode:"backfill"`, #97). */
+export interface BackfillResult {
+  feedId: string;
+  /** `updated` = flux re-fetché et traité ; `error` = feed absent / fetch KO. */
+  status: "updated" | "error";
+  /** Articles existants dont le contenu R2 a été réellement réécrit. */
+  rewritten: number;
+  /** Items présents dans le flux re-parsé (0 sur erreur). */
+  itemCount: number;
+  error?: string;
+}
+
+/**
+ * Backfill d'un Feed (#97) : re-fetche le flux et **ré-sanitize en place** le
+ * contenu R2 des articles **déjà stockés**, pour récupérer les embeds que les
+ * ingestions passées avaient perdus (le HTML brut n'est pas conservé — ADR 0007 ;
+ * seul un re-fetch redonne accès au `content:encoded` d'origine). Symétrique de
+ * {@link ingestFeed}, mais en réécriture pure : aucun net-new inséré, aucune
+ * notification, et l'état de polling du Feed (etag, échéances, santé) est laissé
+ * intact (le backfill ne doit pas perturber le cycle d'ingestion normal).
+ *
+ * Identité préservée : on ne touche qu'aux articles dont la clé de dédup
+ * (`article_key`, ADR 0001) est encore présente dans le flux — `id`, `read`,
+ * `saved`, `fetched_at` restent inchangés, aucun doublon n'est créé. `updated_at`
+ * est bumpé (#69, ADR 0018) : le contenu a changé, l'article « descend » donc au
+ * delta sync. ⚠️ Le lecteur **en ligne** voit aussitôt les embeds (GET
+ * /api/articles/:id lit R2 frais) ; le réplica **hors-ligne** ne re-télécharge
+ * pas encore le HTML sur simple bump (il ne fetche que le contenu absent du
+ * store, cf. `missingContentIds`) — propager le contenu réécrit hors-ligne est
+ * un chantier #69 distinct, hors périmètre de #97.
+ *
+ * **Limite actée** : un item déjà sorti du flux n'a plus de brut récupérable
+ * (ADR 0007) — il n'est pas restaurable et est simplement ignoré ici.
+ *
+ * Borné (garde-fous `fetchFeed` : timeout, taille, redirections) et relançable
+ * (idempotent : la ré-sanitization d'un même brut redonne le même HTML).
+ */
+export async function backfillFeed(
+  feedId: string,
+  db: Db,
+  bucket: R2Bucket,
+  secret: string,
+): Promise<BackfillResult> {
+  // Fabrique locale des retours d'échec (même forme répétée sur chaque sortie).
+  const fail = (error: string): BackfillResult => ({
+    feedId,
+    status: "error",
+    rewritten: 0,
+    itemCount: 0,
+    error,
+  });
+
+  const [feed] = await db
+    .select({ url: feeds.url })
+    .from(feeds)
+    .where(eq(feeds.id, feedId))
+    .limit(1);
+  if (!feed) return fail("feed_not_found");
+
+  let response: Response;
+  let bytes: Uint8Array | null;
+  try {
+    // Pas d'en-têtes conditionnels : on veut le corps même si l'etag matche
+    // (un 304 ne nous redonnerait pas le `content:encoded` à ré-sanitizer).
+    ({ response, bytes } = await fetchFeed(feed.url, { ...FETCH_HEADERS }));
+  } catch (err) {
+    console.error("[backfill] échec du fetch du flux", feedId, err);
+    return fail(toFeedErrorCode(err));
+  }
+  if (!response.ok || !bytes) return fail(`http_${response.status}`);
+
+  const parsed = parseFeed(bytes, response.headers.get("content-type"));
+
+  // Articles existants de ce Feed (borné par le nombre d'articles du flux, comme
+  // `upsertNewArticles`) : on retient l'id et si le `content_key` était déjà posé.
+  const existingRows = await db
+    .select({
+      id: articles.id,
+      key: articles.article_key,
+      contentKey: articles.content_key,
+    })
+    .from(articles)
+    .where(eq(articles.feed_id, feedId));
+  const byKey = new Map(existingRows.map((r) => [r.key, r]));
+
+  // Items du flux dont l'article existe déjà : seuls candidats au backfill.
+  // Dédup intra-flux par id (comme le `seen` d'`upsertNewArticles`) : un flux aux
+  // guid dupliqués mapperait sinon plusieurs items vers le même article → puts R2
+  // redondants et `rewritten` sur-compté.
+  const targets: { id: string; item: ParsedItem; hadContentKey: boolean }[] =
+    [];
+  const seen = new Set<string>();
+  for (const item of parsed.items) {
+    const row = byKey.get(articleKey(item, feedId));
+    if (!row || seen.has(row.id)) continue;
+    seen.add(row.id);
+    targets.push({ id: row.id, item, hadContentKey: row.contentKey !== null });
+  }
+
+  // Ré-sanitize + réécrit R2 en place, par lots bornés (CPU + sous-requêtes).
+  // Garde anti-régression : un contenu désormais vide (extraction infructueuse)
+  // ne doit pas **écraser** l'objet R2 existant — on le préserve et on l'ignore.
+  const rewriteOne = async (target: (typeof targets)[number]) => {
+    const safe = sanitizeArticleContent(
+      secret,
+      target.item.content,
+      target.item.link ?? feed.url,
+    );
+    // `/\S/` teste la présence d'un caractère non-blanc sans copier la string.
+    if (safe === null || !/\S/.test(safe)) return null;
+    try {
+      await bucket.put(articleContentKey(target.id), safe, {
+        httpMetadata: { contentType: "text/html; charset=utf-8" },
+      });
+      return target;
+    } catch (err) {
+      console.error("[backfill] réécriture R2 échouée", target.id, err);
+      return null;
+    }
+  };
+
+  // R2 d'abord, D1 ensuite : on ne bumpe `updated_at` que pour les articles dont
+  // l'objet R2 a réellement été réécrit (un put en échec ne « descend » pas au delta).
+  const rewritten: (typeof targets)[number][] = [];
+  for (const batch of chunk(targets, EXTRACT_CONCURRENCY)) {
+    const done = await Promise.all(batch.map(rewriteOne));
+    for (const t of done) if (t) rewritten.push(t);
+  }
+
+  if (rewritten.length > 0) {
+    const now = nowEpochMs();
+    // Bump `updated_at` (#69) de tous les réécrits : marque le contenu changé au
+    // delta sync. Borné sous la limite de variables D1 (1 réservée pour le SET).
+    for (const group of chunk(
+      rewritten.map((t) => t.id),
+      whereInChunkSize(1),
+    )) {
+      await db
+        .update(articles)
+        .set({ updated_at: now })
+        .where(inArray(articles.id, group));
+    }
+    // `content_key` n'est posé que pour les articles qui n'en avaient pas
+    // (extraction échouée à l'ingestion) : le backfill vient de produire leur
+    // contenu. Rare → une écriture par article, via le helper JS partagé avec
+    // l'ingestion (pas de schéma de clé R2 dupliqué).
+    for (const t of rewritten) {
+      if (t.hadContentKey) continue;
+      await db
+        .update(articles)
+        .set({ content_key: articleContentKey(t.id) })
+        .where(eq(articles.id, t.id));
+    }
+  }
+
+  return {
+    feedId,
+    status: "updated",
+    rewritten: rewritten.length,
+    itemCount: parsed.items.length,
+  };
 }

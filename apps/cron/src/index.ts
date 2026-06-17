@@ -6,7 +6,12 @@
  *
  * Tester le scheduled localement : wrangler dev --config wrangler.jsonc --test-scheduled
  */
-import { getDb, type IngestionMessage, ingestFeed } from "@boreas/shared";
+import {
+  backfillFeed,
+  getDb,
+  type IngestionMessage,
+  ingestFeed,
+} from "@boreas/shared";
 import { vapidKeysFromEnv } from "@boreas/shared/crypto";
 import { processIngestionBatch, runScheduledTick } from "./consumer";
 import { notifyNewArticles } from "./push-notify";
@@ -67,6 +72,8 @@ export default {
 
     await processIngestionBatch(batch.messages, {
       ingest: (feedId) => ingestFeed(feedId, db, env.BUCKET, env.HMAC_SECRET),
+      backfill: (feedId) =>
+        backfillFeed(feedId, db, env.BUCKET, env.HMAC_SECRET),
       notify: (result) => notifyNewArticles(result, db, vapid),
     });
   },

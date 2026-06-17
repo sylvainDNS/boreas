@@ -27,11 +27,13 @@ export type {
 } from "./feed-parser";
 export { parseFeed } from "./feed-parser";
 export type {
+  BackfillResult,
   FetchFeedResult,
   IngestionMessage,
   IngestResult,
 } from "./ingestion";
 export {
+  backfillFeed,
   buildConditionalHeaders,
   computeNextCheckAt,
   deleteArticlesAndContent,

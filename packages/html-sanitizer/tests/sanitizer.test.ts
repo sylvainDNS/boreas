@@ -223,6 +223,20 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("data-attrs");
   });
 
+  it("reconstruit un InstagramToDOM dont les data-attrs sont encodés en entités", () => {
+    // Forme réelle livrée par Substack dans content:encoded : le JSON est encodé
+    // en entités HTML (`&quot;`). linkedom les décode via getAttribute (#96).
+    const thumb =
+      "https://substack-post-media.s3.amazonaws.com/public/images/IG-meta.jpg";
+    const out = sanitizeHtml(
+      `<div data-component-name="InstagramToDOM" data-attrs="{&quot;instagram_id&quot;:&quot;DVwle3zjQXZ&quot;,&quot;thumbnail_url&quot;:&quot;${thumb}&quot;,&quot;title&quot;:&quot;Hello&quot;}"></div>`,
+      { signImageSrc },
+    );
+    expect(out).toContain('href="https://www.instagram.com/p/DVwle3zjQXZ/"');
+    expect(out).toContain(encodeURIComponent(thumb));
+    expect(out).toContain('alt="Hello"');
+  });
+
   it("retire un InstagramToDOM au data-attrs JSON invalide", () => {
     const out = sanitizeHtml(
       `<p>ok</p><div data-component-name="InstagramToDOM" data-attrs="{pas du json}"></div>`,

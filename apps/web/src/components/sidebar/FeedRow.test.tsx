@@ -69,6 +69,33 @@ describe("FeedRow", () => {
     ).toBeInTheDocument();
   });
 
+  it("non-lu : affiche le point « non lu » et met le nom en gras", async () => {
+    renderRow({ unread: 4 });
+    const label = await screen.findByText("Mon flux");
+    expect(label.className).toContain("font-medium");
+    expect(screen.getByLabelText("non lu")).toBeInTheDocument();
+    // Plus de pilule compteur : le chiffre des non-lus n'apparaît pas.
+    expect(screen.queryByText("4")).toBeNull();
+  });
+
+  it("tout lu : pas de point et nom grisé", async () => {
+    renderRow({ unread: 0 });
+    const label = await screen.findByText("Mon flux");
+    expect(label.className).toContain("text-muted");
+    expect(screen.queryByLabelText("non lu")).toBeNull();
+  });
+
+  it("erreur + non-lu : le badge d'erreur et le point cohabitent", async () => {
+    renderRow({
+      feed: makeFeed({ status: "error", lastError: "http_404" }),
+      unread: 2,
+    });
+    expect(
+      await screen.findByRole("img", { name: /Flux en erreur/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("non lu")).toBeInTheDocument();
+  });
+
   it("ouvre « Renommer » via le menu → onRequestDialog(renameFeed)", async () => {
     const { user, onRequestDialog, feed } = renderRow();
     await user.click(

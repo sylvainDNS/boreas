@@ -37,6 +37,7 @@ function renderTree(
     feeds: Feed[];
     onRequestDialog: (d: SidebarDialog) => void;
     online: boolean;
+    unreadByFolder: Map<string, number>;
   }> = {},
 ) {
   stubApi(mockedFetch, {});
@@ -51,7 +52,7 @@ function renderTree(
       unfiledFeeds={unfiledFeeds}
       feedsCount={feeds.length}
       unreadByFeed={new Map()}
-      unreadByFolder={new Map([["tech", 3]])}
+      unreadByFolder={over.unreadByFolder ?? new Map([["tech", 3]])}
       onRequestDialog={onRequestDialog}
       online={over.online ?? true}
     />,
@@ -60,10 +61,23 @@ function renderTree(
 }
 
 describe("FolderTree", () => {
-  it("affiche le compteur de non-lus d'un dossier", async () => {
+  it("dossier avec non-lus : point « non lu » et nom en gras, sans chiffre", async () => {
     renderTree();
-    expect(await screen.findByText("Tech")).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument();
+    const label = await screen.findByText("Tech");
+    expect(label.className).toContain("font-medium");
+    expect(screen.getByLabelText("non lu")).toBeInTheDocument();
+    // Plus de pilule compteur sur le dossier.
+    expect(screen.queryByText("3")).toBeNull();
+  });
+
+  it("dossier tout lu : pas de point et nom grisé", async () => {
+    renderTree({
+      folders: [{ id: "tech", name: "Tech", rank: "a0" }],
+      unreadByFolder: new Map(),
+    });
+    const label = await screen.findByText("Tech");
+    expect(label.className).toContain("text-muted");
+    expect(screen.queryByLabelText("non lu")).toBeNull();
   });
 
   it("replie puis déplie un dossier (les feeds disparaissent/réapparaissent)", async () => {

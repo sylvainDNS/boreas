@@ -172,7 +172,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             if (!data) return null;
             return (
               <div className={`${itemBase} bg-surface text-text shadow-pop`}>
-                <span className="size-1.5 shrink-0 rounded-full bg-muted/40" />
                 <span className="truncate">{data.label}</span>
               </div>
             );

@@ -3,7 +3,7 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { type Feed, feedLabel } from "../../lib/feeds";
 import { menuItemClass, RowMenu } from "../RowMenu";
-import { CountBadge, ErrorBadge } from "../ui/Badge";
+import { ErrorBadge, UnreadDot } from "../ui/Badge";
 import {
   FEED_DRAG_TYPE,
   type FeedDragData,
@@ -11,6 +11,7 @@ import {
   itemBase,
   OFFLINE_OP_TITLE,
   type SidebarDialog,
+  unreadNameClass,
 } from "./sidebar-model";
 
 /**
@@ -72,11 +73,12 @@ export function FeedRow({
         onClick={onNavigate}
         className="flex min-w-0 flex-1 items-center gap-2"
       >
-        <span className="size-1.5 shrink-0 rounded-full bg-muted/40" />
-        <span className="truncate">{label}</span>
+        <span className={`truncate ${unreadNameClass(unread > 0)}`}>
+          {label}
+        </span>
       </Link>
       {feed.status === "error" && <ErrorBadge detail={feed.lastError} />}
-      <CountBadge count={unread} />
+      <UnreadDot hasUnread={unread > 0} />
       <RowMenu
         label={`Actions pour ${label}`}
         triggerClassName="opacity-60 transition-opacity group-hover:opacity-100"

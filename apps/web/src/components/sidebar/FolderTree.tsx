@@ -4,7 +4,7 @@ import { type ReactNode, useState } from "react";
 import type { Feed } from "../../lib/feeds";
 import type { Folder } from "../../lib/folders";
 import { menuItemClass, RowMenu } from "../RowMenu";
-import { CountBadge } from "../ui/Badge";
+import { UnreadDot } from "../ui/Badge";
 import { FeedRow } from "./FeedRow";
 import {
   FEED_DRAG_TYPE,
@@ -13,6 +13,7 @@ import {
   OFFLINE_OP_TITLE,
   type SidebarDialog,
   UNFILED_DROPPABLE_ID,
+  unreadNameClass,
 } from "./sidebar-model";
 
 /** Surbrillance d'une zone de drop survolée par un Feed en cours de drag. */
@@ -205,9 +206,11 @@ function FolderDroppable({
           className="flex min-w-0 flex-1 items-center gap-2"
         >
           <span aria-hidden>📁</span>
-          <span className="truncate">{folder.name}</span>
+          <span className={`truncate ${unreadNameClass(unread > 0)}`}>
+            {folder.name}
+          </span>
         </Link>
-        <CountBadge count={unread} />
+        <UnreadDot hasUnread={unread > 0} />
         <RowMenu
           label={`Actions pour ${folder.name}`}
           triggerClassName="opacity-60 transition-opacity group-hover:opacity-100"

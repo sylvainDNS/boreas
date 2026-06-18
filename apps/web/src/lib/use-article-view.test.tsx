@@ -248,8 +248,8 @@ describe("useArticleView", () => {
         syncFeed({ id: "fc", folderId: "fo2" }),
       ],
       [
-        { id: "fo1", name: "Tech" },
-        { id: "fo2", name: "Autre" },
+        { id: "fo1", name: "Tech", rank: "a0" },
+        { id: "fo2", name: "Autre", rank: "a1" },
       ],
     );
     const markBodies: unknown[] = [];

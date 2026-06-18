@@ -70,7 +70,7 @@ describe("resubscribeFeed — sucre unitaire", () => {
   });
 
   it("ne touche pas au folder_id existant (aucune option fournie)", async () => {
-    await db.insert(folders).values({ id: "f1", name: "Tech" });
+    await db.insert(folders).values({ id: "f1", name: "Tech", rank: "a0" });
     await db.insert(feeds).values(unsubscribedFeed("a", "f1"));
 
     await resubscribeFeed(db, "a");
@@ -101,7 +101,7 @@ describe("resubscribeFeeds — lots", () => {
   });
 
   it("réassigne folder_id quand folderId est fourni", async () => {
-    await db.insert(folders).values({ id: "f1", name: "Tech" });
+    await db.insert(folders).values({ id: "f1", name: "Tech", rank: "a0" });
     await db.insert(feeds).values(unsubscribedFeed("a", null));
 
     await resubscribeFeeds(db, ["a"], { folderId: "f1" });
@@ -112,7 +112,7 @@ describe("resubscribeFeeds — lots", () => {
   });
 
   it("conserve folder_id existant quand folderId est absent", async () => {
-    await db.insert(folders).values({ id: "f1", name: "Tech" });
+    await db.insert(folders).values({ id: "f1", name: "Tech", rank: "a0" });
     await db.insert(feeds).values(unsubscribedFeed("a", "f1"));
 
     await resubscribeFeeds(db, ["a"]);

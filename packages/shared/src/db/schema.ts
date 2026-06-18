@@ -199,6 +199,15 @@ export const folders = sqliteTable("folders", {
   id: text("id").primaryKey(),
   /** Nom affiché du Folder (libre, non vide côté API). */
   name: text("name").notNull(),
+  /**
+   * Rang fractionnaire (#108, ADR 0020) : clé lexicographique d'ordre manuel des
+   * Folders. `GET /api/folders` trie par ce rang (asc) ; la création pose un rang
+   * en fin de liste (`rankBetween(lastRank, null)`). Backfillé pour les Folders
+   * existants dans l'ordre alpha (`name ASC`) avec des clés `fractional-indexing`
+   * valides (migration), pour rester intercalable. Pas de défaut côté code : tout
+   * INSERT applicatif fournit un rang explicite.
+   */
+  rank: text("rank").notNull(),
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),

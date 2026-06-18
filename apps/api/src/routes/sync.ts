@@ -117,6 +117,7 @@ syncRoutes.get("/", async (c) => {
       .select({
         id: folders.id,
         name: folders.name,
+        rank: folders.rank,
         updatedAt: folders.updated_at,
       })
       .from(folders)
@@ -146,6 +147,7 @@ syncRoutes.get("/", async (c) => {
   const upsertFolders: SyncFolder[] = folderRows.map((row) => ({
     id: row.id,
     name: row.name,
+    rank: row.rank,
   }));
 
   const tombstoneItems: SyncTombstone[] = tombstoneRows.map((row) => ({

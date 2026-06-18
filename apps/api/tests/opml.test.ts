@@ -73,4 +73,31 @@ describe("POST /api/opml/import (#17)", () => {
     }>();
     expect(row?.n).toBe(count);
   });
+
+  it("attribue un rang fractionnaire croissant aux Folders importés (#108, ADR 0020)", async () => {
+    // Deux dossiers imbriqués, placés en fin de liste dans l'ordre d'apparition.
+    const opml = `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0"><head><title>Export</title></head><body>
+  <outline text="Tech" title="Tech">
+    <outline text="A" title="A" type="rss" xmlUrl="https://src.example/a.xml"/>
+  </outline>
+  <outline text="Actu" title="Actu">
+    <outline text="B" title="B" type="rss" xmlUrl="https://src.example/b.xml"/>
+  </outline>
+</body></opml>`;
+
+    const res = await importOpml(opml);
+    expect(res.status).toBe(200);
+    expect((await res.json()).foldersCreated).toBe(2);
+
+    const rows = await env.DB.prepare(
+      "SELECT name, rank FROM folders ORDER BY rank ASC",
+    ).all<{ name: string; rank: string }>();
+    const items = rows.results;
+    // Ordre par rang = ordre d'apparition dans l'OPML (Tech avant Actu).
+    expect(items.map((f) => f.name)).toEqual(["Tech", "Actu"]);
+    // Rangs non vides et strictement croissants.
+    expect(items[0].rank.length).toBeGreaterThan(0);
+    expect(items[0].rank < items[1].rank).toBe(true);
+  });
 });

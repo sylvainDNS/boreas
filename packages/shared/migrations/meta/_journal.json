@@ -85,6 +85,13 @@
       "when": 1781520324231,
       "tag": "0011_lethal_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1781800413117,
+      "tag": "0012_cool_supreme_intelligence",
+      "breakpoints": true
     }
   ]
 }

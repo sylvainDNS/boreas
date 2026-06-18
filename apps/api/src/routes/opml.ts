@@ -10,10 +10,11 @@ import {
   folders,
   getDb,
   insertChunkSize,
+  ranksAfter,
   resubscribeFeeds,
   whereInChunkSize,
 } from "@boreas/shared";
-import { inArray, isNull } from "drizzle-orm";
+import { desc, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
 
@@ -27,9 +28,10 @@ import type { Env } from "../env";
 // paramètre.) Sous-estimer ce compte fait dépasser la limite SQLite de 100
 // variables → « too many SQL variables » sur un import volumineux.
 const FEED_INSERT_CHUNK = insertChunkSize(6);
-// INSERT folders : 3 paramètres par ligne (id, name + le `$defaultFn`
-// d'`updated_at` lié à l'INSERT, #69).
-const FOLDER_INSERT_CHUNK = insertChunkSize(3);
+// INSERT folders : 4 paramètres par ligne (id, name, rank + le `$defaultFn`
+// d'`updated_at` lié à l'INSERT, #69). `rank` (#108) est désormais fourni
+// explicitement à chaque ligne.
+const FOLDER_INSERT_CHUNK = insertChunkSize(4);
 
 /**
  * Routes OPML (montées sur /api/opml), sous le middleware de session. Permettent
@@ -97,10 +99,23 @@ opmlRoutes.post("/import", async (c) => {
       if (!folderIdByName.has(f.name)) folderIdByName.set(f.name, f.id);
     }
     const missing = folderNames.filter((name) => !folderIdByName.has(name));
-    const newFolders = missing.map((name) => ({
-      id: crypto.randomUUID(),
-      name,
-    }));
+    // Rangs (#108, ADR 0020) : les Folders importés sont placés en **fin de liste**,
+    // après le dernier rang existant, dans l'ordre d'apparition dans l'OPML.
+    const [lastFolder] = await db
+      .select({ rank: folders.rank })
+      .from(folders)
+      .orderBy(desc(folders.rank))
+      .limit(1);
+    // `ranksAfter` renvoie exactement `missing.length` clés ; on les apparie aux
+    // noms par `zip` pour que chaque ligne porte une `rank: string` non nullable
+    // (une colonne NOT NULL) sans cast masquant un `undefined`.
+    const newRanks = ranksAfter(lastFolder?.rank ?? null, missing.length);
+    const newFolders = missing.map((name, i) => {
+      const rank = newRanks[i];
+      if (rank === undefined)
+        throw new Error("rank manquant pour un Folder OPML");
+      return { id: crypto.randomUUID(), name, rank };
+    });
     for (const group of chunk(newFolders, FOLDER_INSERT_CHUNK)) {
       await db.insert(folders).values(group);
     }

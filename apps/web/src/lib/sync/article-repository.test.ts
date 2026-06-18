@@ -175,8 +175,8 @@ describe("article-repository — restriction folderId", () => {
         feed({ id: "fc", folderId: "folder-2" }),
       ],
       [
-        { id: "folder-1", name: "Dossier 1" },
-        { id: "folder-2", name: "Dossier 2" },
+        { id: "folder-1", name: "Dossier 1", rank: "a0" },
+        { id: "folder-2", name: "Dossier 2", rank: "a1" },
       ],
     );
     const page = await readArticlePage(
@@ -267,8 +267,8 @@ describe("article-repository — compteurs locaux", () => {
         feed({ id: "f4", folderId: null }),
       ],
       [
-        { id: "fo1", name: "Dossier 1" },
-        { id: "fo2", name: "Dossier 2" },
+        { id: "fo1", name: "Dossier 1", rank: "a0" },
+        { id: "fo2", name: "Dossier 2", rank: "a1" },
       ],
     );
 
@@ -293,7 +293,7 @@ describe("article-repository — compteurs locaux", () => {
     await seed(
       [article({ id: "a1", feedId: "f1", read: true })],
       [feed({ id: "f1", folderId: "fo1" })],
-      [{ id: "fo1", name: "Dossier 1" }],
+      [{ id: "fo1", name: "Dossier 1", rank: "a0" }],
     );
     const counts = await localArticleCounts(db);
     expect(counts.total).toBe(0);

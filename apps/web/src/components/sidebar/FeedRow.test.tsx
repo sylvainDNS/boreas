@@ -33,8 +33,8 @@ function makeFeed(over: Partial<Feed> = {}): Feed {
 }
 
 const folders: Folder[] = [
-  { id: "tech", name: "Tech" },
-  { id: "perso", name: "Perso" },
+  { id: "tech", name: "Tech", rank: "a0" },
+  { id: "perso", name: "Perso", rank: "a1" },
 ];
 
 function renderRow(

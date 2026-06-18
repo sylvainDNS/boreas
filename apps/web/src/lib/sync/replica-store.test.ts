@@ -44,7 +44,11 @@ function feed(over: Partial<SyncFeed> & { id: string }): SyncFeed {
 }
 
 function folder(over: Partial<SyncFolder> & { id: string }): SyncFolder {
-  return { id: over.id, name: over.name ?? `Dossier ${over.id}` };
+  return {
+    id: over.id,
+    name: over.name ?? `Dossier ${over.id}`,
+    rank: over.rank ?? "a0",
+  };
 }
 
 let db: ReplicaDb;

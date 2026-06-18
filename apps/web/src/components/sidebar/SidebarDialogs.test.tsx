@@ -55,7 +55,7 @@ const feed: Feed = {
   lastCheckAt: null,
   folderId: null,
 };
-const folder: Folder = { id: "fold", name: "Tech" };
+const folder: Folder = { id: "fold", name: "Tech", rank: "a0" };
 
 describe("SidebarDialogs", () => {
   it("crée un dossier (POST /folders) puis ferme", async () => {

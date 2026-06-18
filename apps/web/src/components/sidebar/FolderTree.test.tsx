@@ -53,7 +53,6 @@ function renderTree(
       unreadByFeed={new Map()}
       unreadByFolder={new Map([["tech", 3]])}
       onRequestDialog={onRequestDialog}
-      onMove={vi.fn()}
       online={over.online ?? true}
     />,
   );

@@ -2,8 +2,7 @@ import { useDraggable } from "@dnd-kit/react";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { type Feed, feedLabel } from "../../lib/feeds";
-import type { Folder } from "../../lib/folders";
-import { MenuLabel, menuItemClass, RowMenu } from "../RowMenu";
+import { menuItemClass, RowMenu } from "../RowMenu";
 import { CountBadge, ErrorBadge } from "../ui/Badge";
 import {
   FEED_DRAG_TYPE,
@@ -17,25 +16,22 @@ import {
 /**
  * Ligne d'un Feed dans la Sidebar (#48). État actif dérivé de la route
  * (`useMatchRoute`) ; badges existants (erreur, non-lus). Le menu n'agit pas
- * lui-même : il **demande** un dialogue (`onRequestDialog`) ou un déplacement
- * (`onMove`), laissant la composition pilote l'état des dialogues et le router.
+ * lui-même : il **demande** un dialogue (`onRequestDialog`), laissant la
+ * composition piloter l'état des dialogues et le router. Le déplacement passe
+ * uniquement par le drag-n-drop (#113 : menu réduit à Renommer + Se désabonner).
  */
 export function FeedRow({
   feed,
   unread,
-  folders,
   onRequestDialog,
-  onMove,
   onNavigate,
   online,
 }: {
   feed: Feed;
   unread: number;
-  folders: readonly Folder[];
   onRequestDialog: (dialog: SidebarDialog) => void;
-  onMove: (id: string, folderId: string | null) => void;
   onNavigate?: () => void;
-  /** Connexion réseau : déplacement (drag + menu) et actions cycle de vie gatés. */
+  /** Connexion réseau : drag et actions cycle de vie gatés. */
   online: boolean;
 }) {
   const matchRoute = useMatchRoute();
@@ -59,7 +55,7 @@ export function FeedRow({
     type: FEED_DRAG_TYPE,
     data: dragData,
     // Déplacement = op online-only (ADR 0018) : hors-ligne, le drag est désactivé
-    // (le menu « Déplacer vers » l'est aussi, et `onDragEnd` no-op en secours).
+    // (et `onDragEnd` no-op en secours).
     disabled: !online,
   });
 
@@ -100,38 +96,6 @@ export function FeedRow({
             >
               Renommer…
             </button>
-            <MenuLabel>Déplacer vers</MenuLabel>
-            <button
-              type="button"
-              role="menuitem"
-              className={menuItemClass}
-              disabled={!online || feed.folderId == null}
-              title={online ? undefined : OFFLINE_OP_TITLE}
-              onClick={() => {
-                close();
-                onMove(feed.id, null);
-              }}
-            >
-              Aucun dossier {feed.folderId == null ? "✓" : ""}
-            </button>
-            {folders.map((folder) => (
-              <button
-                key={folder.id}
-                type="button"
-                role="menuitem"
-                className={menuItemClass}
-                disabled={!online || feed.folderId === folder.id}
-                title={online ? undefined : OFFLINE_OP_TITLE}
-                onClick={() => {
-                  close();
-                  onMove(feed.id, folder.id);
-                }}
-              >
-                <span className="truncate">{folder.name}</span>
-                {feed.folderId === folder.id ? " ✓" : ""}
-              </button>
-            ))}
-            <div className="my-1 border-border border-t" />
             <button
               type="button"
               role="menuitem"
@@ -144,19 +108,6 @@ export function FeedRow({
               }}
             >
               Se désabonner
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!online}
-              title={online ? undefined : OFFLINE_OP_TITLE}
-              className={`${menuItemClass} text-danger`}
-              onClick={() => {
-                close();
-                onRequestDialog({ kind: "deleteFeed", feed });
-              }}
-            >
-              Supprimer…
             </button>
           </>
         )}

@@ -5,15 +5,6 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 export const menuItemClass =
   "flex w-full items-center gap-2 rounded-card px-3 py-2 text-left text-sm text-text transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
-/** En-tête de groupe à l'intérieur d'un menu (libellé non cliquable). */
-export function MenuLabel({ children }: { children: ReactNode }) {
-  return (
-    <p className="px-3 pt-2 pb-1 font-semibold text-[0.65rem] text-muted uppercase tracking-wide">
-      {children}
-    </p>
-  );
-}
-
 /**
  * Menu contextuel « ⋯ » d'une ligne de sidebar (#13). Popover maison (cohérent
  * avec `Dialog`) : ferme sur Échap, sur clic extérieur et après sélection (le

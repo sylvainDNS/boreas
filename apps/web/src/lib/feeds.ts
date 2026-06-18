@@ -4,7 +4,6 @@ import type {
   FeedsResponse,
   FeedUnsubscribedResponse,
   FeedUpdatedResponse,
-  OkResponse,
   SubscribeCandidatesResponse,
   SubscribeSubscribedResponse,
 } from "@boreas/api-contracts";
@@ -192,19 +191,6 @@ export function unsubscribeFeedMutationOptions(queryClient: QueryClient) {
       apiFetch<FeedUnsubscribedResponse>(`/feeds/${id}/unsubscribe`, {
         method: "POST",
       }),
-    onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
-  };
-}
-
-/**
- * Mutation de **suppression** (`DELETE /api/feeds/:id`, #14). Action destructive
- * (confirmée par l'appelant) : efface le feed et tous ses articles, Saved
- * compris. Mêmes invalidations que le désabonnement.
- */
-export function deleteFeedMutationOptions(queryClient: QueryClient) {
-  return {
-    mutationFn: (id: string) =>
-      apiFetch<OkResponse>(`/feeds/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidateAfterFeedLifecycle(queryClient),
   };
 }

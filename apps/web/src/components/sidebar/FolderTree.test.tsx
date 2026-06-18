@@ -40,7 +40,7 @@ function renderTree(
   }> = {},
 ) {
   stubApi(mockedFetch, {});
-  const folders = over.folders ?? [{ id: "tech", name: "Tech" }];
+  const folders = over.folders ?? [{ id: "tech", name: "Tech", rank: "a0" }];
   const feeds = over.feeds ?? [makeFeed("f1", "tech"), makeFeed("u1", null)];
   const { feedsByFolder, unfiledFeeds } = groupFeedsByFolder(folders, feeds);
   const onRequestDialog = over.onRequestDialog ?? vi.fn();
@@ -93,7 +93,10 @@ describe("FolderTree", () => {
   });
 
   it("affiche « Dossier vide. » pour un dossier sans feed", async () => {
-    renderTree({ folders: [{ id: "tech", name: "Tech" }], feeds: [] });
+    renderTree({
+      folders: [{ id: "tech", name: "Tech", rank: "a0" }],
+      feeds: [],
+    });
     expect(await screen.findByText("Dossier vide.")).toBeInTheDocument();
   });
 

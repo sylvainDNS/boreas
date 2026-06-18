@@ -44,6 +44,7 @@ export {
   ingestFeed,
 } from "./ingestion";
 export { sendPushAndPrune } from "./push";
+export { initialRanks, rankBetween, ranksAfter } from "./rank";
 export type { ResubscribeOptions } from "./resubscribe";
 export { resubscribeFeed, resubscribeFeeds } from "./resubscribe";
 export {

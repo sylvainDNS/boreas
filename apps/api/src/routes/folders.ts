@@ -10,9 +10,10 @@ import {
   folders,
   getDb,
   nowEpochMs,
+  rankBetween,
   writeTombstones,
 } from "@boreas/shared";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
 
@@ -25,18 +26,25 @@ import type { Env } from "../env";
  */
 export const foldersRoutes = new Hono<{ Bindings: Env }>();
 
-/** Liste des Folders, triés par nom (ordre stable pour la sidebar). */
+/** Liste des Folders, triés par rang fractionnaire (ordre manuel, ADR 0020). */
 foldersRoutes.get("/", async (c) => {
   const db = getDb(c.env.DB);
   const rows = await db
-    .select({ id: folders.id, name: folders.name })
+    .select({ id: folders.id, name: folders.name, rank: folders.rank })
     .from(folders)
-    .orderBy(asc(folders.name));
+    // Tri par rang, `id` en départage : garantit un ordre **total déterministe**
+    // même si deux Folders partageaient un rang (rééquilibrage en cours, conflit
+    // multi-appareils ADR 0018, ou backfill historique non couvert).
+    .orderBy(asc(folders.rank), asc(folders.id));
 
   return c.json({ folders: rows } satisfies FoldersResponse);
 });
 
-/** Création d'un Folder. Le nom n'a pas à être unique. */
+/**
+ * Création d'un Folder. Le nom n'a pas à être unique. Le nouveau Folder est placé
+ * **en fin de liste** : son rang s'intercale après le dernier rang existant
+ * (`rankBetween(lastRank, null)`, ADR 0020). `updated_at` est posé à la création.
+ */
 foldersRoutes.post("/", async (c) => {
   const parsed = folderNameSchema.safeParse(
     await c.req.json().catch(() => ({})),
@@ -48,9 +56,22 @@ foldersRoutes.post("/", async (c) => {
   const id = crypto.randomUUID();
   const name = parsed.data.name;
   const db = getDb(c.env.DB);
-  await db.insert(folders).values({ id, name });
 
-  return c.json({ folder: { id, name } } satisfies FolderCreatedResponse, 201);
+  // Rang du dernier Folder (par rang desc) pour insérer après lui. `null` si la
+  // liste est vide → première clé du conteneur.
+  const [last] = await db
+    .select({ rank: folders.rank })
+    .from(folders)
+    .orderBy(desc(folders.rank))
+    .limit(1);
+  const rank = rankBetween(last?.rank ?? null, null);
+
+  await db.insert(folders).values({ id, name, rank });
+
+  return c.json(
+    { folder: { id, name, rank } } satisfies FolderCreatedResponse,
+    201,
+  );
 });
 
 /** Renommage d'un Folder. 404 si l'id est inconnu. */
@@ -65,16 +86,22 @@ foldersRoutes.patch("/:id", async (c) => {
   const db = getDb(c.env.DB);
 
   // Le renommage est une mutation de domaine → bump `updated_at` (#69, ADR 0018).
+  // Le rang n'est pas touché par un renommage ; on le relit pour l'écho de réponse.
   const updated = await db
     .update(folders)
     .set({ name: parsed.data.name, updated_at: nowEpochMs() })
     .where(eq(folders.id, id))
-    .returning({ id: folders.id });
+    .returning({ id: folders.id, rank: folders.rank });
 
-  if (updated.length === 0) {
+  const row = updated[0];
+  if (!row) {
     return c.json({ error: "not_found" }, 404);
   }
-  return c.json({ id, name: parsed.data.name } satisfies FolderRenamedResponse);
+  return c.json({
+    id,
+    name: parsed.data.name,
+    rank: row.rank,
+  } satisfies FolderRenamedResponse);
 });
 
 /**

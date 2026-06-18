@@ -16,10 +16,18 @@ function authed(init?: RequestInit): RequestInit {
   };
 }
 
-/** Insère un Folder (id explicite pour des assertions déterministes). */
-async function seedFolder(id: string, name: string): Promise<void> {
-  await env.DB.prepare("INSERT INTO folders (id, name) VALUES (?, ?)")
-    .bind(id, name)
+/**
+ * Insère un Folder (id explicite pour des assertions déterministes). `rank` est
+ * une clé fractional-indexing explicite (ADR 0020) : à défaut, on dérive un rang
+ * croissant de l'id pour éviter les collisions entre Folders seedés.
+ */
+async function seedFolder(
+  id: string,
+  name: string,
+  rank?: string,
+): Promise<void> {
+  await env.DB.prepare("INSERT INTO folders (id, name, rank) VALUES (?, ?, ?)")
+    .bind(id, name, rank ?? `a${id}`)
     .run();
 }
 
@@ -89,7 +97,7 @@ describe("CRUD /api/folders (#13)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("crée un Folder et le liste, trié par nom", async () => {
+  it("crée des Folders et les liste, triés par rang (ordre de création, ADR 0020)", async () => {
     await SELF.fetch(
       `${ORIGIN}/api/folders`,
       authed({ method: "POST", body: JSON.stringify({ name: "  Tech  " }) }),
@@ -101,9 +109,27 @@ describe("CRUD /api/folders (#13)", () => {
 
     const res = await SELF.fetch(`${ORIGIN}/api/folders`, authed());
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { folders: { name: string }[] };
-    // Tri par nom + trim appliqué à la création.
-    expect(body.folders.map((f) => f.name)).toEqual(["Actu", "Tech"]);
+    const body = (await res.json()) as {
+      folders: { name: string; rank: string }[];
+    };
+    // Tri par rang : chaque création place le Folder en fin de liste (rang
+    // croissant), donc l'ordre suit l'ordre de création. Trim appliqué au nom.
+    expect(body.folders.map((f) => f.name)).toEqual(["Tech", "Actu"]);
+    // Les rangs exposés sont strictement croissants.
+    expect(body.folders[0].rank < body.folders[1].rank).toBe(true);
+  });
+
+  it("expose le rang dans la réponse de création (POST, ADR 0020)", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/folders`,
+      authed({ method: "POST", body: JSON.stringify({ name: "Tech" }) }),
+    );
+    expect(res.status).toBe(201);
+    const { folder } = (await res.json()) as {
+      folder: { id: string; name: string; rank: string };
+    };
+    expect(typeof folder.rank).toBe("string");
+    expect(folder.rank.length).toBeGreaterThan(0);
   });
 
   it("refuse un nom vide (400)", async () => {
@@ -115,14 +141,19 @@ describe("CRUD /api/folders (#13)", () => {
   });
 
   it("renomme un Folder (200) et 404 sur id inconnu", async () => {
-    await seedFolder("fold-1", "Ancien");
+    await seedFolder("fold-1", "Ancien", "a0");
 
     const ok = await SELF.fetch(
       `${ORIGIN}/api/folders/fold-1`,
       authed({ method: "PATCH", body: JSON.stringify({ name: "Nouveau" }) }),
     );
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ id: "fold-1", name: "Nouveau" });
+    // Le renommage préserve le rang et le ré-écho (ADR 0020).
+    expect(await ok.json()).toEqual({
+      id: "fold-1",
+      name: "Nouveau",
+      rank: "a0",
+    });
 
     const missing = await SELF.fetch(
       `${ORIGIN}/api/folders/nope`,

@@ -21,8 +21,8 @@ function makeFeed(id: string, folderId: string | null): Feed {
 }
 
 /** Fabrique un Folder minimal. */
-function makeFolder(id: string): Folder {
-  return { id, name: id };
+function makeFolder(id: string, rank = "a0"): Folder {
+  return { id, name: id, rank };
 }
 
 describe("groupFeedsByFolder", () => {

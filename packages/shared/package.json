@@ -17,6 +17,7 @@
     "drizzle-orm": "^0.45.2",
     "entities": "^8.0.0",
     "fast-xml-parser": "5.8.0",
+    "fractional-indexing": "^3.2.0",
     "linkedom": "0.18.12"
   },
   "devDependencies": {

@@ -38,16 +38,22 @@ async function seedFeed(opts: {
     .run();
 }
 
-/** Insère un Folder avec un `updated_at` explicite. */
+/** Insère un Folder avec un `updated_at` (et un rang) explicites. */
 async function seedFolder(opts: {
   id: string;
   name?: string;
+  rank?: string;
   updatedAt: number;
 }): Promise<void> {
   await env.DB.prepare(
-    "INSERT INTO folders (id, name, updated_at) VALUES (?, ?, ?)",
+    "INSERT INTO folders (id, name, rank, updated_at) VALUES (?, ?, ?, ?)",
   )
-    .bind(opts.id, opts.name ?? `Dossier ${opts.id}`, opts.updatedAt)
+    .bind(
+      opts.id,
+      opts.name ?? `Dossier ${opts.id}`,
+      opts.rank ?? `a${opts.id}`,
+      opts.updatedAt,
+    )
     .run();
 }
 
@@ -102,7 +108,7 @@ interface SyncBody {
   upserts: {
     articles: { id: string }[];
     feeds: { id: string }[];
-    folders: { id: string }[];
+    folders: { id: string; rank: string }[];
   };
   tombstones: { entityType: string; entityId: string }[];
   cursor: number | null;
@@ -133,7 +139,7 @@ describe("GET /api/sync — garde", () => {
 
 describe("GET /api/sync — sync initiale (since absent)", () => {
   it("renvoie toutes les métadonnées (articles lus + non-lus, feeds, folders)", async () => {
-    await seedFolder({ id: "fold-1", updatedAt: 1000 });
+    await seedFolder({ id: "fold-1", rank: "a0", updatedAt: 1000 });
     await seedFeed({ id: "feed-1", folderId: "fold-1", updatedAt: 1000 });
     await seedArticle({ id: "art-read", read: true, updatedAt: 2000 });
     await seedArticle({ id: "art-unread", read: false, updatedAt: 2000 });
@@ -147,6 +153,8 @@ describe("GET /api/sync — sync initiale (since absent)", () => {
     ]);
     expect(body.upserts.feeds.map((f) => f.id)).toEqual(["feed-1"]);
     expect(body.upserts.folders.map((f) => f.id)).toEqual(["fold-1"]);
+    // Le delta porte le rang fractionnaire du Folder (#108, ADR 0020).
+    expect(body.upserts.folders[0].rank).toBe("a0");
   });
 
   it("renvoie l'item article au format wire de la liste (avec feedName, saved, read)", async () => {

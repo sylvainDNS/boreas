@@ -95,7 +95,7 @@ async function seedReplica(articles: SyncArticle[], feeds: SyncFeed[] = []) {
 describe("Sidebar (intégration)", () => {
   it("affiche les feeds, les folders et le compteur global (compteurs locaux #73)", async () => {
     const feeds: Feed[] = [makeFeed("alpha"), makeFeed("beta", "tech")];
-    const folders: Folder[] = [{ id: "tech", name: "Tech" }];
+    const folders: Folder[] = [{ id: "tech", name: "Tech", rank: "a0" }];
     // 5 non-lus au total, calculés localement depuis le réplica.
     await seedReplica(
       [

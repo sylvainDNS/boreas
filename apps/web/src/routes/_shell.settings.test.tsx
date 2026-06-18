@@ -1,10 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "../lib/api";
 import type { Settings } from "../lib/settings";
+import { renderWithApp } from "../test/render";
 import { SettingsView } from "./_shell.settings";
 
 vi.mock("../lib/api", async (importActual) => {
@@ -31,19 +29,13 @@ function stubApi(get: Settings = DEFAULTS) {
   }) as never);
 }
 
-function renderWithClient(ui: ReactNode) {
-  const queryClient = new QueryClient({
-    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-  render(ui, { wrapper });
-  return userEvent.setup();
-}
-
+/**
+ * Rendu sous routeur réel (`renderWithApp`) : la `SettingsView` héberge
+ * désormais `LogoutButton`, qui consomme `useNavigate` — un mock de
+ * `@tanstack/react-router` ne suffirait pas.
+ */
 function renderView() {
-  return renderWithClient(<SettingsView />);
+  return renderWithApp(<SettingsView />);
 }
 
 beforeEach(() => {
@@ -71,7 +63,7 @@ describe("SettingsView (#18)", () => {
 
   it("PATCH l'intervalle au changement de preset", async () => {
     stubApi();
-    const user = renderView();
+    const { user } = renderView();
 
     const refresh = await screen.findByLabelText<HTMLSelectElement>(
       "Intervalle de rafraîchissement",
@@ -89,7 +81,7 @@ describe("SettingsView (#18)", () => {
 
   it("PATCH le thème au choix dans le sélecteur segmenté", async () => {
     stubApi();
-    const user = renderView();
+    const { user } = renderView();
     await screen.findByLabelText("Intervalle de rafraîchissement");
 
     await user.click(screen.getByRole("button", { name: "Sombre" }));
@@ -99,5 +91,14 @@ describe("SettingsView (#18)", () => {
         body: JSON.stringify({ theme: "dark" }),
       }),
     );
+  });
+
+  it("expose l'action « Se déconnecter » (#116)", async () => {
+    stubApi();
+    renderView();
+
+    expect(
+      await screen.findByRole("button", { name: "Se déconnecter" }),
+    ).toBeInTheDocument();
   });
 });

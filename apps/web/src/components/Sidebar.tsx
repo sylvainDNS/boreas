@@ -5,11 +5,10 @@ import {
   KeyboardSensor,
   PointerSensor,
 } from "@dnd-kit/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { articleCountsQueryOptions } from "../lib/articles";
-import { AUTH_QUERY_KEY, logout } from "../lib/auth";
 import { feedsQueryOptions } from "../lib/feeds";
 import { foldersQueryOptions } from "../lib/folders";
 import { useOnlineStatus } from "../lib/use-online-status";
@@ -60,9 +59,6 @@ const dragSensors = [
  * `useFeedLifecycle` porte la navigation après désabonnement/suppression.
  */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
   // Un seul dialogue ouvert à la fois (`null` = aucun), cf. `SidebarDialog`.
   const [dialog, setDialog] = useState<SidebarDialog | null>(null);
 
@@ -98,13 +94,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     () => groupFeedsByFolder(foldersData, feedsData),
     [foldersData, feedsData],
   );
-
-  async function handleLogout() {
-    await logout();
-    queryClient.setQueryData(AUTH_QUERY_KEY, false);
-    onNavigate?.();
-    await navigate({ to: "/login" });
-  }
 
   // Fin de drag : un Feed (source) lâché sur un dossier ou la zone « sans
   // dossier » (target). On ignore l'annulation et les drops hors cible, et on
@@ -189,7 +178,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       {/* Indicateur de connexion + badge « actions en attente » (#81). */}
       <OfflineStatus />
 
-      <div className="space-y-2 border-border border-t p-3">
+      <div className="border-border border-t p-3">
         <Link
           to="/settings"
           onClick={onNavigate}
@@ -199,10 +188,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <span aria-hidden>⚙</span>
           <span>Réglages</span>
         </Link>
-        <button type="button" onClick={handleLogout} className={itemBase}>
-          <span aria-hidden>⎋</span>
-          <span>Se déconnecter</span>
-        </button>
       </div>
     </div>
   );

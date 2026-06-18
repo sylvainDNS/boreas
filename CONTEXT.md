@@ -37,7 +37,7 @@ Inverse d'**Unsubscribe** — efface `unsubscribed_at` et réinitialise toute la
 _Avoid_: Reactivate, Re-enable
 
 **Delete** (Suppression):
-Action destructive et explicite : efface le **Feed** et **tous** ses **Articles**, **Saved compris**. Irréversible.
+Action destructive et explicite : efface le **Feed** et **tous** ses **Articles**, **Saved compris**. Irréversible. **N'est plus exposé dans l'interface** : concept interne (maintenance / OPML) sans point d'entrée utilisateur. La seule action de retrait offerte à l'utilisateur est **Unsubscribe**.
 _Avoid_: Unsubscribe
 
 ## Relationships
@@ -60,4 +60,4 @@ _Avoid_: Unsubscribe
 - "Subscription" : fusionné dans **Feed** — il n'existe qu'un seul abonné, une entité distincte n'apporterait qu'une jointure inutile.
 - **Folder** ≠ vue des Articles d'un Feed : un **Folder** regroupe des **Feeds**. La liste des Articles d'un flux, c'est le **Feed** lui-même.
 - **Label** : concept envisagé (étiquettes transversales sur les Feeds) puis **abandonné** pour rester simple — un seul axe d'organisation, le **Folder**.
-- **Unsubscribe** vs **Delete** : Unsubscribe est réversible et **préserve les Saved** ; Delete est destructif et les efface.
+- **Unsubscribe** vs **Delete** : Unsubscribe est réversible et **préserve les Saved** ; Delete est destructif et les efface. La distinction n'est **pas exposée dans l'UI** (jugée trop technique) : l'unique action utilisateur sur un **Feed** est **Se désabonner** (Unsubscribe). **Delete** subsiste comme concept de domaine mais n'a plus de point d'entrée dans l'interface.

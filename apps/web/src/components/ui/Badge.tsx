@@ -1,5 +1,28 @@
 import type { ReactNode } from "react";
 
+/**
+ * Point de présence « non-lus » sans chiffre (#115), aligné à droite des lignes
+ * flux/dossier. Pastille pleine en couleur d'accent du design system ; rien si
+ * tout est lu. Le compteur chiffré (`CountBadge`) reste réservé aux vues
+ * globales (« Tous les non-lus »).
+ */
+export function UnreadDot({
+  hasUnread,
+  className = "",
+}: {
+  hasUnread: boolean;
+  className?: string;
+}) {
+  if (!hasUnread) return null;
+  return (
+    <span
+      role="img"
+      aria-label="non lu"
+      className={`size-2 shrink-0 rounded-full bg-accent ${className}`}
+    />
+  );
+}
+
 /** Pastille de compteur (non-lus). Discrète si zéro. */
 export function CountBadge({
   count,

@@ -14,6 +14,14 @@ export const itemBase =
 export const itemActive = "bg-surface-2 font-medium text-accent";
 
 /**
+ * Style du libellé d'une ligne flux/dossier selon l'état de lecture (#115) :
+ * **gras** si non-lus, grisé (`text-muted`) si tout est lu. Factorisé entre
+ * `FeedRow` et `FolderTree` pour garantir une apparence cohérente.
+ */
+export const unreadNameClass = (hasUnread: boolean) =>
+  hasUnread ? "font-medium" : "text-muted";
+
+/**
  * Message commun des ops Feeds/Folders **online-only** désactivées hors-ligne
  * (#81, ADR 0018) : ajout/déplacement/renommage/suppression/désabonnement
  * exigent le réseau. Posé en `title` (info-bulle) sur les déclencheurs désactivés.

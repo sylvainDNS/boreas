@@ -98,9 +98,7 @@ describe("FeedRow", () => {
     // Seules les actions Renommer + Se désabonner subsistent (#113).
     const items = screen.getAllByRole("menuitem").map((el) => el.textContent);
     expect(items).toEqual(["Renommer…", "Se désabonner"]);
-    expect(
-      screen.queryByRole("menuitem", { name: "Supprimer…" }),
-    ).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Supprimer…" })).toBeNull();
     expect(screen.queryByText("Déplacer vers")).toBeNull();
     expect(
       screen.queryByRole("menuitem", { name: /Aucun dossier/ }),

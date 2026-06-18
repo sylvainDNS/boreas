@@ -121,6 +121,21 @@ describe("Sidebar (intégration)", () => {
     expect(await screen.findByText("5")).toBeInTheDocument();
   });
 
+  it("n'affiche plus de bouton Se déconnecter (déplacé dans les Réglages #116)", async () => {
+    stubApi(mockedFetch, {
+      "GET /feeds": { feeds: [] },
+      "GET /folders": { folders: [] },
+    });
+
+    renderWithApp(<Sidebar />);
+
+    // Le lien Réglages reste le seul résident du bloc bas.
+    expect(
+      await screen.findByRole("link", { name: /Réglages/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Se déconnecter" })).toBeNull();
+  });
+
   it("crée un dossier de bout en bout (menu + → dialogue → POST)", async () => {
     let createdName: string | undefined;
     stubApi(mockedFetch, {

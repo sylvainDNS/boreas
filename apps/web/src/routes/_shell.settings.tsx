@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { LogoutButton } from "../components/LogoutButton";
 import { OpmlImportDialog } from "../components/OpmlImportDialog";
 import { PushToggle } from "../components/PushToggle";
 import { ResetReplicaButton } from "../components/ResetReplicaButton";
@@ -188,6 +189,9 @@ export function SettingsView() {
             hint="En cas de problème de synchronisation, efface les données locales et les retélécharge depuis le serveur."
           >
             <ResetReplicaButton />
+          </Row>
+          <Row label="Session" hint="Déconnexion de cet appareil.">
+            <LogoutButton />
           </Row>
         </div>
         {settings.isError && (

@@ -21,10 +21,11 @@ const dropTargetClass = "rounded-card ring-2 ring-accent ring-inset";
 /**
  * Sections « Dossiers » et « Flux (sans dossier) » de la Sidebar (#48). Porte
  * l'état local des dossiers repliés (`collapsed`) et les états vides. Délègue
- * chaque ligne Feed à `FeedRow` et chaque action à `onRequestDialog`/`onMove` ;
- * ne touche ni aux mutations ni au router. Chaque dossier et la zone « sans
- * dossier » sont des cibles de drop — déléguées à `FolderDroppable` et au
- * droppable de section ci-dessous.
+ * chaque ligne Feed à `FeedRow` et chaque action à `onRequestDialog` ; ne touche
+ * ni aux mutations ni au router. Le déplacement passe par le drag-n-drop, géré
+ * au niveau de la Sidebar (#113). Chaque dossier et la zone « sans dossier » sont
+ * des cibles de drop — déléguées à `FolderDroppable` et au droppable de section
+ * ci-dessous.
  */
 export function FolderTree({
   folders,
@@ -34,7 +35,6 @@ export function FolderTree({
   unreadByFeed,
   unreadByFolder,
   onRequestDialog,
-  onMove,
   onNavigate,
   online,
 }: {
@@ -46,7 +46,6 @@ export function FolderTree({
   unreadByFeed: ReadonlyMap<string, number>;
   unreadByFolder: ReadonlyMap<string, number>;
   onRequestDialog: (dialog: SidebarDialog) => void;
-  onMove: (id: string, folderId: string | null) => void;
   onNavigate?: () => void;
   /** Connexion réseau : les ops Feeds/Folders online-only sont gatées dessus. */
   online: boolean;
@@ -69,9 +68,7 @@ export function FolderTree({
         key={feed.id}
         feed={feed}
         unread={unreadByFeed.get(feed.id) ?? 0}
-        folders={folders}
         onRequestDialog={onRequestDialog}
-        onMove={onMove}
         onNavigate={onNavigate}
         online={online}
       />

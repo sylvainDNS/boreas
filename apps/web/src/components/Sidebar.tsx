@@ -160,7 +160,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             unreadByFeed={unreadByFeed}
             unreadByFolder={unreadByFolder}
             onRequestDialog={setDialog}
-            onMove={lifecycle.move}
             onNavigate={onNavigate}
             online={online}
           />
@@ -185,7 +184,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         dialog={dialog}
         onClose={() => setDialog(null)}
         unsubscribe={lifecycle.unsubscribe}
-        remove={lifecycle.remove}
         online={online}
       />
 

@@ -23,13 +23,12 @@ function SidebarDialogsHarness({
   online?: boolean;
 }) {
   const [dialog, setDialog] = useState<SidebarDialog | null>(initialDialog);
-  const { unsubscribe, remove } = useFeedLifecycle();
+  const { unsubscribe } = useFeedLifecycle();
   return (
     <SidebarDialogs
       dialog={dialog}
       onClose={() => setDialog(null)}
       unsubscribe={unsubscribe}
-      remove={remove}
       online={online}
     />
   );
@@ -89,16 +88,6 @@ describe("SidebarDialogs", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Se désabonner" }),
-    ).toBeInTheDocument();
-  });
-
-  it("affiche le libellé destructif de la suppression d'un feed", async () => {
-    stubApi(mockedFetch, {});
-    renderWithApp(
-      <SidebarDialogsHarness initialDialog={{ kind: "deleteFeed", feed }} />,
-    );
-    expect(
-      await screen.findByText(/Cette action est irréversible/i),
     ).toBeInTheDocument();
   });
 

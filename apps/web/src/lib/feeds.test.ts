@@ -2,11 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "./api";
 import { ARTICLES_COUNTS_KEY, ARTICLES_LIST_KEY } from "./articles";
-import {
-  deleteFeedMutationOptions,
-  FEEDS_LIST_KEY,
-  unsubscribeFeedMutationOptions,
-} from "./feeds";
+import { FEEDS_LIST_KEY, unsubscribeFeedMutationOptions } from "./feeds";
 
 // On mocke le transport bas niveau ; toute la logique des mutationOptions
 // (chemin, méthode, invalidations) reste réelle.
@@ -39,25 +35,6 @@ describe("unsubscribeFeedMutationOptions (#14)", () => {
     await opts.mutationFn("f1");
     expect(mockedFetch).toHaveBeenCalledWith("/feeds/f1/unsubscribe", {
       method: "POST",
-    });
-
-    opts.onSuccess();
-    const keys = invalidateQueries.mock.calls.map((c) => c[0]?.queryKey);
-    expect(keys).toContainEqual(FEEDS_LIST_KEY);
-    expect(keys).toContainEqual(ARTICLES_LIST_KEY);
-    expect(keys).toContainEqual(ARTICLES_COUNTS_KEY);
-  });
-});
-
-describe("deleteFeedMutationOptions (#14)", () => {
-  it("DELETE /feeds/:id et invalide feeds + listes + compteurs", async () => {
-    mockedFetch.mockResolvedValueOnce({ ok: true });
-    const { client, invalidateQueries } = fakeQueryClient();
-    const opts = deleteFeedMutationOptions(client);
-
-    await opts.mutationFn("f2");
-    expect(mockedFetch).toHaveBeenCalledWith("/feeds/f2", {
-      method: "DELETE",
     });
 
     opts.onSuccess();

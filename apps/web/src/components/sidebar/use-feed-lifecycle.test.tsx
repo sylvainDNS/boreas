@@ -75,21 +75,6 @@ describe("useFeedLifecycle", () => {
     expect(result.current.router.state.location.pathname).toBe("/feeds/active");
   });
 
-  it("supprime le feed actif puis retombe sur « Tous les non-lus »", async () => {
-    stubApi(mockedFetch, { "DELETE /feeds/:id": { ok: true } });
-    const client = createTestQueryClient();
-    const wrapper = createAppWrapper({ initialPath: "/feeds/f1", client });
-    const { result } = renderHook(() => useFeedLifecycle(), { wrapper });
-    await waitFor(() => expect(result.current).not.toBeNull());
-
-    result.current.remove.mutate(makeFeed("f1"));
-
-    await waitFor(() => expect(result.current.remove.isSuccess).toBe(true));
-    await waitFor(() =>
-      expect(result.current.router.state.location.pathname).toBe("/"),
-    );
-  });
-
   it("invalide feeds + listes + compteurs après un désabonnement", async () => {
     stubApi(mockedFetch, {
       "POST /feeds/:id/unsubscribe": { status: "unsubscribed" },

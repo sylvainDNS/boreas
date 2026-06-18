@@ -88,9 +88,11 @@ export function groupFeedsByFolder(
 }
 
 /**
- * Dialogue ouvert de la Sidebar (#48). Union discriminée sur `kind` à 7 variants,
- * remplaçant les 6 `useState` indépendants : un seul dialogue est ouvert à la
+ * Dialogue ouvert de la Sidebar (#48). Union discriminée sur `kind` à 6 variants,
+ * remplaçant les `useState` indépendants : un seul dialogue est ouvert à la
  * fois (`null` = aucun). Chaque variant porte la cible nécessaire à son rendu.
+ * Plus de variant `deleteFeed` (#113) : la suppression destructive d'un feed
+ * n'a plus de point d'entrée dans l'UI (Se désabonner est l'action unifiée).
  */
 export type SidebarDialog =
   | { kind: "addFeed" }
@@ -98,5 +100,4 @@ export type SidebarDialog =
   | { kind: "renameFolder"; folder: Folder }
   | { kind: "renameFeed"; feed: Feed }
   | { kind: "deleteFolder"; folder: Folder }
-  | { kind: "unsubscribeFeed"; feed: Feed }
-  | { kind: "deleteFeed"; feed: Feed };
+  | { kind: "unsubscribeFeed"; feed: Feed };

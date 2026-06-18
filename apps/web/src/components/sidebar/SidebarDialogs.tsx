@@ -15,27 +15,25 @@ import type { FeedLifecycle } from "./use-feed-lifecycle";
 /**
  * Dialogues de la Sidebar (#48), pilotés par l'union `SidebarDialog` (un seul
  * ouvert à la fois, `null` = aucun). Possède les mutations de cycle de vie des
- * Folders et le renommage de Feed ; reçoit les mutations désabonnement/
- * suppression de Feed déjà câblées à la navigation (`use-feed-lifecycle`).
- * Libellés repris mot pour mot (Unsubscribe non destructif vs Delete destructif,
- * cf. ADR 0010).
+ * Folders et le renommage de Feed ; reçoit la mutation de désabonnement de Feed
+ * déjà câblée à la navigation (`use-feed-lifecycle`). La suppression destructive
+ * d'un feed n'a plus de point d'entrée UI (#113) : seul Se désabonner subsiste.
+ * Libellé du désabonnement repris mot pour mot (non destructif, cf. ADR 0010).
  */
 export function SidebarDialogs({
   dialog,
   onClose,
   unsubscribe,
-  remove,
   online,
 }: {
   dialog: SidebarDialog | null;
   onClose: () => void;
   unsubscribe: FeedLifecycle["unsubscribe"];
-  remove: FeedLifecycle["remove"];
   /**
    * Connexion réseau. Les déclencheurs de ces dialogues (online-only, ADR 0018)
    * sont déjà désactivés hors-ligne dans la Sidebar ; cette garde couvre le cas
    * d'une connexion **perdue dialogue ouvert** : on désactive alors les
-   * confirmations destructives (suppression/désabonnement de Feed) qui ne
+   * confirmations (suppression de Folder, désabonnement de Feed) qui ne
    * passeraient pas par l'optimistic-update et échoueraient au réseau.
    */
   online: boolean;
@@ -53,7 +51,6 @@ export function SidebarDialogs({
     deleteFolder.reset();
     updateFeed.reset();
     unsubscribe.reset();
-    remove.reset();
     onClose();
   }
 
@@ -190,44 +187,6 @@ export function SidebarDialogs({
             }}
           >
             {unsubscribe.isPending ? "…" : "Se désabonner"}
-          </Button>
-        </div>
-      </Dialog>
-
-      {/* Confirmation de suppression d'un Feed (#14, destructif). */}
-      <Dialog
-        open={dialog?.kind === "deleteFeed"}
-        onClose={close}
-        title="Supprimer le flux"
-      >
-        <p className="text-sm text-text">
-          Supprimer définitivement «&nbsp;
-          {dialog?.kind === "deleteFeed" ? feedLabel(dialog.feed) : ""}&nbsp;» ?
-          Le flux et{" "}
-          <strong>tous ses articles, y compris les sauvegardés</strong>, seront
-          effacés. Cette action est irréversible.
-        </p>
-        {remove.isError && (
-          <p
-            className="mt-3 text-red-600 text-sm dark:text-red-400"
-            role="alert"
-          >
-            Suppression impossible, réessayez.
-          </p>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" onClick={close}>
-            Annuler
-          </Button>
-          <Button
-            variant="danger"
-            disabled={remove.isPending || !online}
-            onClick={() => {
-              if (dialog?.kind !== "deleteFeed") return;
-              remove.mutate(dialog.feed, { onSuccess: close });
-            }}
-          >
-            {remove.isPending ? "…" : "Supprimer"}
           </Button>
         </div>
       </Dialog>

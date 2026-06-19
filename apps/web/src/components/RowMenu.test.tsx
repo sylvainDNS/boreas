@@ -5,12 +5,14 @@ import { menuItemClass, RowMenu } from "./RowMenu";
 
 function setup() {
   const onSelect = vi.fn();
+  const onClose = vi.fn();
   const user = userEvent.setup();
   render(
-    <RowMenu label="Actions">
+    <RowMenu label="Actions" position={{ x: 10, y: 20 }} onClose={onClose}>
       {(close) => (
         <button
           type="button"
+          role="menuitem"
           className={menuItemClass}
           onClick={() => {
             close();
@@ -22,30 +24,26 @@ function setup() {
       )}
     </RowMenu>,
   );
-  return { onSelect, user };
+  return { onSelect, onClose, user };
 }
 
 describe("RowMenu", () => {
-  it("ouvre le menu au clic et le ferme après sélection", async () => {
-    const { onSelect, user } = setup();
-    const trigger = screen.getByRole("button", { name: "Actions" });
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-
-    await user.click(trigger);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-    await user.click(screen.getByRole("button", { name: "Renommer…" }));
-    expect(onSelect).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  it("rend le popover ancré, labellisé, avec ses entrées", () => {
+    setup();
+    const menu = screen.getByRole("menu", { name: "Actions" });
+    expect(menu).toBeInTheDocument();
+    // Ancré en viewport (`position: fixed` via Tailwind) à des coordonnées inline.
+    expect(menu.className).toContain("fixed");
+    expect(menu).toHaveStyle({ left: "10px", top: "20px" });
+    expect(
+      screen.getByRole("menuitem", { name: "Renommer…" }),
+    ).toBeInTheDocument();
   });
 
-  it("ferme le menu sur Échap", async () => {
-    const { user } = setup();
-    await user.click(screen.getByRole("button", { name: "Actions" }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  it("referme via le `close` passé aux entrées après sélection", async () => {
+    const { onSelect, onClose, user } = setup();
+    await user.click(screen.getByRole("menuitem", { name: "Renommer…" }));
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

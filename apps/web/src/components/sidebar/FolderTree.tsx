@@ -1,11 +1,12 @@
 import { useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import type { Feed } from "../../lib/feeds";
 import type { Folder } from "../../lib/folders";
-import { menuItemClass, RowMenu } from "../RowMenu";
+import { menuItemClass, RowMenu, rowMenuTriggerClass } from "../RowMenu";
 import { UnreadDot } from "../ui/Badge";
+import { useRowMenu } from "../useRowMenu";
 import { FeedRow } from "./FeedRow";
 import { FOLDER_DRAG_TYPE, type FolderDragData } from "./folder-reorder";
 import {
@@ -201,13 +202,20 @@ function FolderDroppable({
   const isActive = Boolean(
     matchRoute({ to: "/folders/$folderId", params: { folderId: folder.id } }),
   );
+  const menu = useRowMenu();
+  // Alimente le fantôme du DragOverlay sans relire le cache (#114 : ghost fidèle
+  // à la ligne). Mémoïsé sur des primitives car dnd-kit compare `data` par
+  // `Object.is` et réécrirait le signal à chaque render (poll, route) sinon.
+  const dragData = useMemo<FolderDragData>(
+    () => ({ name: folder.name, hasUnread: unread > 0, isExpanded }),
+    [folder.name, unread, isExpanded],
+  );
   const { ref, isDropTarget } = useSortable<FolderDragData>({
     id: folder.id,
     index,
     group: FOLDERS_SORTABLE_GROUP,
     type: FOLDER_DRAG_TYPE,
-    // Alimente le fantôme du DragOverlay sans relire le cache.
-    data: { name: folder.name },
+    data: dragData,
     // Reste cible de drop d'un Feed (déplacement Feed→Dossier, #13) en plus du
     // réordonnancement entre dossiers.
     accept: [FOLDER_DRAG_TYPE, FEED_DRAG_TYPE],
@@ -218,7 +226,12 @@ function FolderDroppable({
 
   return (
     <div ref={ref} className={isDropTarget ? dropTargetClass : undefined}>
-      <div className={`group ${itemBase} ${isActive ? itemActive : ""}`}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: clic droit / Shift+F10 sur toute la ligne ne sont qu'une commodité ; l'accès clavier passe par le bouton déclencheur focalisable (#114). */}
+      <div
+        onContextMenu={menu.onContextMenu}
+        onKeyDown={menu.onKeyDown}
+        className={`group ${itemBase} ${isActive ? itemActive : ""}`}
+      >
         <button
           type="button"
           aria-label={isExpanded ? "Replier le dossier" : "Déplier le dossier"}
@@ -242,8 +255,7 @@ function FolderDroppable({
         <UnreadDot hasUnread={unread > 0} />
         {/* « + » par dossier (#118) : ouvre l'ajout de flux pré-scopé à ce
             dossier. Visible en permanence (pas de group-hover), discret
-            (`text-muted`). Online-only (ADR 0018). Le RowMenu (Renommer/
-            Supprimer) reste à côté — sa relocalisation est le périmètre de #114.
+            (`text-muted`). Online-only (ADR 0018).
             Classe reprise du « + » sans-dossier pour la cohérence. */}
         <button
           type="button"
@@ -263,41 +275,56 @@ function FolderDroppable({
         >
           +
         </button>
-        <RowMenu
-          label={`Actions pour ${folder.name}`}
-          triggerClassName="opacity-60 transition-opacity group-hover:opacity-100"
+        {/* Plus de kebab permanent (#114) : déclencheur révélé au focus clavier,
+            invisible au repos. Clic droit / Shift+F10 / touche Menu ouvrent le
+            même menu via `useRowMenu`. */}
+        <button
+          type="button"
+          {...menu.triggerProps}
+          aria-label={`Actions pour ${folder.name}`}
+          title={`Actions pour ${folder.name}`}
+          className={rowMenuTriggerClass}
         >
-          {(close) => (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!online}
-                title={online ? undefined : OFFLINE_OP_TITLE}
-                className={menuItemClass}
-                onClick={() => {
-                  close();
-                  onRequestDialog({ kind: "renameFolder", folder });
-                }}
-              >
-                Renommer…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!online}
-                title={online ? undefined : OFFLINE_OP_TITLE}
-                className={`${menuItemClass} text-danger`}
-                onClick={() => {
-                  close();
-                  onRequestDialog({ kind: "deleteFolder", folder });
-                }}
-              >
-                Supprimer
-              </button>
-            </>
-          )}
-        </RowMenu>
+          ⋯
+        </button>
+        {menu.position && (
+          <RowMenu
+            label={`Actions pour ${folder.name}`}
+            position={menu.position}
+            onClose={menu.close}
+          >
+            {(close) => (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!online}
+                  title={online ? undefined : OFFLINE_OP_TITLE}
+                  className={menuItemClass}
+                  onClick={() => {
+                    close();
+                    onRequestDialog({ kind: "renameFolder", folder });
+                  }}
+                >
+                  Renommer…
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!online}
+                  title={online ? undefined : OFFLINE_OP_TITLE}
+                  className={`${menuItemClass} text-danger`}
+                  onClick={() => {
+                    close();
+                    onRequestDialog({ kind: "deleteFolder", folder });
+                  }}
+                >
+                  Supprimer
+                </button>
+              </>
+            )}
+          </RowMenu>
+        )}
       </div>
       {isExpanded && (
         <div className="ml-4 space-y-1 border-border border-l pl-1">

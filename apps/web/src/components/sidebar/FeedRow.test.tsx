@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "../../lib/api";
 import type { Feed } from "../../lib/feeds";
@@ -97,6 +97,46 @@ describe("FeedRow", () => {
       await screen.findByRole("img", { name: /Flux en erreur/ }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("non lu")).toBeInTheDocument();
+  });
+
+  it("le déclencheur d'actions est masqué au repos (révélé au focus, #114)", async () => {
+    renderRow();
+    const trigger = await screen.findByRole("button", { name: /Actions pour/ });
+    // Plus de kebab permanent : invisible tant que la ligne n'a pas le focus.
+    expect(trigger.className).toContain("opacity-0");
+  });
+
+  it("clic droit sur la ligne ouvre le menu contextuel (#114)", async () => {
+    renderRow();
+    const link = await screen.findByRole("link", { name: /Mon flux/ });
+    const row = link.closest(".group");
+    if (!row) throw new Error("ligne introuvable");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 30, clientY: 40 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("Shift+F10 au focus de la ligne ouvre le menu (a11y, #114)", async () => {
+    const { user } = renderRow();
+    const link = await screen.findByRole("link", { name: /Mon flux/ });
+    link.focus();
+    await user.keyboard("{Shift>}{F10}{/Shift}");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("ferme le menu sur Échap puis sur clic extérieur (#114)", async () => {
+    const { user } = renderRow();
+    const trigger = await screen.findByRole("button", { name: /Actions pour/ });
+
+    await user.click(trigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("ouvre « Renommer » via le menu → onRequestDialog(renameFeed)", async () => {

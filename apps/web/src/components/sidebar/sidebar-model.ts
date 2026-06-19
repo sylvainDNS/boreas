@@ -30,6 +30,15 @@ export const unreadNameClass = (hasUnread: boolean) =>
 export const OFFLINE_OP_TITLE = "Indisponible hors-ligne";
 
 /**
+ * Style des **boutons « + » discrets** des en-têtes de la Sidebar (nouveau
+ * dossier, ajouter un flux sans dossier, ajouter un flux dans un dossier #118).
+ * Factorisé pour qu'un restyle (survol, focus, état désactivé) reste cohérent
+ * entre les trois déclencheurs (cf. `itemBase`/`OFFLINE_OP_TITLE`).
+ */
+export const addIconButtonClass =
+  "rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
+
+/**
  * Type des draggables de la Sidebar (drag-n-drop des Feeds). Les droppables
  * (dossiers + zone « sans dossier ») n'acceptent que ce type, ce qui isole le
  * drag des Feeds de tout autre usage futur de dnd-kit.
@@ -210,7 +219,9 @@ export function groupFeedsByFolder(
  * n'a plus de point d'entrée dans l'UI (Se désabonner est l'action unifiée).
  */
 export type SidebarDialog =
-  | { kind: "addFeed" }
+  // `folderId`/`folderName` (#118) pré-scopent l'ajout au dossier (« + » de son
+  // en-tête) ; absents = ajout « sans dossier » (« + » de la section Flux).
+  | { kind: "addFeed"; folderId?: string | null; folderName?: string }
   | { kind: "createFolder" }
   | { kind: "renameFolder"; folder: Folder }
   | { kind: "renameFeed"; feed: Feed }

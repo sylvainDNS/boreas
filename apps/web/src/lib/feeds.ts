@@ -61,17 +61,35 @@ export type SubscribeOutcome =
   | { kind: "candidates"; candidates: DiscoveredFeed[] };
 
 /**
+ * Variables d'une mutation d'abonnement (#118) : l'URL à suivre et, en option,
+ * le dossier cible. `folderId` à `null`/absent = abonnement « sans dossier » (le
+ * « + » pré-scopé d'un dossier le renseigne, cf. #118 / route `POST /api/feeds`
+ * #117).
+ */
+export interface SubscribeFeedVars {
+  url: string;
+  /** Dossier cible (#118) : non vide → flux créé dedans ; `null`/absent = sans dossier. */
+  folderId?: string | null;
+}
+
+/**
  * Soumet une URL (de flux **ou** de site) à `POST /api/feeds`. Le backend tente
  * l'abonnement direct puis, à défaut, l'auto-découverte : il renvoie soit le
  * feed abonné (201), soit la liste des flux candidats (200). On distingue les
- * deux par la présence de `candidates` dans le corps.
+ * deux par la présence de `candidates` dans le corps. `folderId` (#118),
+ * lorsqu'il est non nul, est joint au corps pour pré-scoper l'abonnement à ce
+ * dossier ; sinon il est **omis** (et non envoyé à `null`) — le backend traite
+ * l'absence comme « sans dossier ».
  */
-export async function submitFeedUrl(url: string): Promise<SubscribeOutcome> {
+export async function submitFeedUrl(
+  url: string,
+  folderId?: string | null,
+): Promise<SubscribeOutcome> {
   const body = await apiFetch<
     SubscribeSubscribedResponse | SubscribeCandidatesResponse
   >("/feeds", {
     method: "POST",
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, ...(folderId != null ? { folderId } : {}) }),
   });
   if ("candidates" in body) {
     return { kind: "candidates", candidates: body.candidates };
@@ -91,7 +109,8 @@ export async function submitFeedUrl(url: string): Promise<SubscribeOutcome> {
  */
 export function subscribeFeedMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: (url: string) => submitFeedUrl(url),
+    mutationFn: ({ url, folderId }: SubscribeFeedVars) =>
+      submitFeedUrl(url, folderId),
     onSuccess: (outcome: SubscribeOutcome) => {
       if (outcome.kind !== "subscribed") return;
       invalidateAfterFeedLifecycle(queryClient);

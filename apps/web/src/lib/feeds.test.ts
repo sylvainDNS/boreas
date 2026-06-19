@@ -7,6 +7,7 @@ import {
   type Feed,
   moveAndRankFeedMutationOptions,
   reorderFeedMutationOptions,
+  submitFeedUrl,
   unsubscribeFeedMutationOptions,
 } from "./feeds";
 
@@ -65,6 +66,53 @@ function feedOrder(client: QueryClient): { id: string; rank: string }[] {
     rank: f.rank,
   }));
 }
+
+describe("submitFeedUrl (#118)", () => {
+  it("ajoute folderId au corps quand il est fourni", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      feed: { id: "f1", url: "https://blog.example/feed.xml", title: "Blog" },
+      articleCount: 0,
+    });
+
+    await submitFeedUrl("https://blog.example/feed.xml", "fo1");
+
+    expect(mockedFetch).toHaveBeenCalledWith("/feeds", {
+      method: "POST",
+      body: JSON.stringify({
+        url: "https://blog.example/feed.xml",
+        folderId: "fo1",
+      }),
+    });
+  });
+
+  it("omet folderId du corps quand il est absent", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      feed: { id: "f1", url: "https://blog.example/feed.xml", title: "Blog" },
+      articleCount: 0,
+    });
+
+    await submitFeedUrl("https://blog.example/feed.xml");
+
+    expect(mockedFetch).toHaveBeenCalledWith("/feeds", {
+      method: "POST",
+      body: JSON.stringify({ url: "https://blog.example/feed.xml" }),
+    });
+  });
+
+  it("omet folderId quand il vaut null (zone sans dossier explicite)", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      feed: { id: "f1", url: "https://blog.example/feed.xml", title: "Blog" },
+      articleCount: 0,
+    });
+
+    await submitFeedUrl("https://blog.example/feed.xml", null);
+
+    expect(mockedFetch).toHaveBeenCalledWith("/feeds", {
+      method: "POST",
+      body: JSON.stringify({ url: "https://blog.example/feed.xml" }),
+    });
+  });
+});
 
 describe("reorderFeedMutationOptions (#111)", () => {
   it("PATCH /feeds/:id {rank} (le serveur écrit le rang verbatim)", async () => {

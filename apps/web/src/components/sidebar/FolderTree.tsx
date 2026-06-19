@@ -9,6 +9,7 @@ import { UnreadDot } from "../ui/Badge";
 import { FeedRow } from "./FeedRow";
 import { FOLDER_DRAG_TYPE, type FolderDragData } from "./folder-reorder";
 import {
+  addIconButtonClass,
   FEED_DRAG_TYPE,
   itemActive,
   itemBase,
@@ -101,7 +102,7 @@ export function FolderTree({
             disabled={!online}
             aria-label="Nouveau dossier"
             title={online ? "Nouveau dossier" : OFFLINE_OP_TITLE}
-            className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            className={addIconButtonClass}
           >
             +
           </button>
@@ -138,7 +139,7 @@ export function FolderTree({
             disabled={!online}
             aria-label="Ajouter un flux"
             title={online ? "Ajouter un flux" : OFFLINE_OP_TITLE}
-            className="rounded-card px-1.5 text-base text-muted leading-none transition-colors hover:bg-surface-2 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            className={addIconButtonClass}
           >
             +
           </button>
@@ -239,6 +240,29 @@ function FolderDroppable({
           </span>
         </Link>
         <UnreadDot hasUnread={unread > 0} />
+        {/* « + » par dossier (#118) : ouvre l'ajout de flux pré-scopé à ce
+            dossier. Visible en permanence (pas de group-hover), discret
+            (`text-muted`). Online-only (ADR 0018). Le RowMenu (Renommer/
+            Supprimer) reste à côté — sa relocalisation est le périmètre de #114.
+            Classe reprise du « + » sans-dossier pour la cohérence. */}
+        <button
+          type="button"
+          onClick={() =>
+            onRequestDialog({
+              kind: "addFeed",
+              folderId: folder.id,
+              folderName: folder.name,
+            })
+          }
+          disabled={!online}
+          aria-label={`Ajouter un flux dans ${folder.name}`}
+          title={
+            online ? `Ajouter un flux dans ${folder.name}` : OFFLINE_OP_TITLE
+          }
+          className={addIconButtonClass}
+        >
+          +
+        </button>
         <RowMenu
           label={`Actions pour ${folder.name}`}
           triggerClassName="opacity-60 transition-opacity group-hover:opacity-100"

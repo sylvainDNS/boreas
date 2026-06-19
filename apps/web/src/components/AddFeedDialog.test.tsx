@@ -15,14 +15,17 @@ vi.mock("../lib/api", async (importActual) => {
 
 const mockedFetch = vi.mocked(apiFetch);
 
-function renderDialog(onClose = vi.fn()) {
+function renderDialog(
+  props: { folderId?: string | null; folderName?: string } = {},
+  onClose = vi.fn(),
+) {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  render(<AddFeedDialog open onClose={onClose} />, { wrapper });
+  render(<AddFeedDialog open onClose={onClose} {...props} />, { wrapper });
   return { onClose, user: userEvent.setup() };
 }
 
@@ -100,5 +103,100 @@ describe("AddFeedDialog", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/déjà abonné/i);
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("pré-scopé : soumet avec le folderId fourni (#118)", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      feed: { id: "f1", url: "https://blog.example/feed.xml", title: "Blog" },
+      articleCount: 3,
+    });
+    const { user } = renderDialog({ folderId: "fo1", folderName: "Tech" });
+
+    await user.type(
+      screen.getByLabelText(/URL du flux/i),
+      "https://blog.example/feed.xml",
+    );
+    await user.click(screen.getByRole("button", { name: "Ajouter" }));
+
+    await waitFor(() =>
+      expect(mockedFetch).toHaveBeenCalledWith(
+        "/feeds",
+        expect.objectContaining({
+          body: JSON.stringify({
+            url: "https://blog.example/feed.xml",
+            folderId: "fo1",
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("sans dossier : soumet sans folderId dans le corps (#118)", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      feed: { id: "f1", url: "https://blog.example/feed.xml", title: "Blog" },
+      articleCount: 3,
+    });
+    const { user } = renderDialog();
+
+    await user.type(
+      screen.getByLabelText(/URL du flux/i),
+      "https://blog.example/feed.xml",
+    );
+    await user.click(screen.getByRole("button", { name: "Ajouter" }));
+
+    await waitFor(() =>
+      expect(mockedFetch).toHaveBeenCalledWith(
+        "/feeds",
+        expect.objectContaining({
+          body: JSON.stringify({ url: "https://blog.example/feed.xml" }),
+        }),
+      ),
+    );
+  });
+
+  it("le candidat choisi est aussi soumis avec le folderId (#118)", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      candidates: [
+        { url: "https://site.example/rss.xml", title: "RSS", type: "rss" },
+      ],
+    });
+    mockedFetch.mockResolvedValueOnce({
+      feed: { id: "f1", url: "https://site.example/rss.xml", title: "RSS" },
+      articleCount: 1,
+    });
+    const { user } = renderDialog({ folderId: "fo1", folderName: "Tech" });
+
+    await user.type(
+      screen.getByLabelText(/URL du flux/i),
+      "https://site.example",
+    );
+    await user.click(screen.getByRole("button", { name: "Ajouter" }));
+    await user.click(await screen.findByText("RSS"));
+
+    await waitFor(() =>
+      expect(mockedFetch).toHaveBeenLastCalledWith(
+        "/feeds",
+        expect.objectContaining({
+          body: JSON.stringify({
+            url: "https://site.example/rss.xml",
+            folderId: "fo1",
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("titre contextuel quand folderName est fourni (#118)", () => {
+    renderDialog({ folderId: "fo1", folderName: "Tech" });
+    expect(
+      screen.getByRole("heading", { name: "Ajouter un flux dans Tech" }),
+    ).toBeInTheDocument();
+  });
+
+  it("titre générique sans folderName", () => {
+    renderDialog();
+    expect(
+      screen.getByRole("heading", { name: "Ajouter un flux" }),
+    ).toBeInTheDocument();
   });
 });

@@ -122,12 +122,40 @@ describe("FolderTree", () => {
     expect(onRequestDialog).toHaveBeenCalledWith({ kind: "createFolder" });
   });
 
-  it("le « + » flux demande le dialogue addFeed", async () => {
+  it("le « + » flux (sans dossier) demande addFeed sans folderId", async () => {
     const { user, onRequestDialog } = renderTree();
     await user.click(
       await screen.findByRole("button", { name: "Ajouter un flux" }),
     );
     expect(onRequestDialog).toHaveBeenCalledWith({ kind: "addFeed" });
+  });
+
+  it("le « + » par dossier demande addFeed pré-scopé (#118)", async () => {
+    const { user, onRequestDialog } = renderTree();
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Ajouter un flux dans Tech",
+      }),
+    );
+    expect(onRequestDialog).toHaveBeenCalledWith({
+      kind: "addFeed",
+      folderId: "tech",
+      folderName: "Tech",
+    });
+  });
+
+  it("hors-ligne : désactive le « + » par dossier (#118)", async () => {
+    renderTree({ online: false });
+    expect(
+      await screen.findByRole("button", { name: "Ajouter un flux dans Tech" }),
+    ).toBeDisabled();
+  });
+
+  it("conserve le kebab d'actions du dossier (non-régression #113)", async () => {
+    renderTree();
+    expect(
+      await screen.findByRole("button", { name: /Actions pour Tech/ }),
+    ).toBeInTheDocument();
   });
 
   it("affiche l'état vide global quand il n'y a aucun feed", async () => {

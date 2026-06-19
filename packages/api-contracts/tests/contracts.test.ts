@@ -46,6 +46,7 @@ describe("@boreas/api-contracts", () => {
       lastError: null,
       lastCheckAt: "2026-06-10T10:00:00.000Z",
       folderId: null,
+      rank: "a0",
     });
     expect(ok.success).toBe(true);
   });

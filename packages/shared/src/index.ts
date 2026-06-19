@@ -26,6 +26,7 @@ export type {
   ParsedItem,
 } from "./feed-parser";
 export { parseFeed } from "./feed-parser";
+export { feedContainerScope, lastFeedRankInContainer } from "./feed-rank";
 export type {
   BackfillResult,
   FetchFeedResult,

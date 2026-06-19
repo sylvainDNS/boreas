@@ -53,6 +53,7 @@ const feed: Feed = {
   lastError: null,
   lastCheckAt: null,
   folderId: null,
+  rank: "a0",
 };
 const folder: Folder = { id: "fold", name: "Tech", rank: "a0" };
 

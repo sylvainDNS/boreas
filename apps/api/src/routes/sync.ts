@@ -107,6 +107,7 @@ syncRoutes.get("/", async (c) => {
         lastError: feeds.last_error,
         lastCheckAt: feeds.last_check_at,
         folderId: feeds.folder_id,
+        rank: feeds.rank,
         unsubscribedAt: feeds.unsubscribed_at,
         consecutiveFailures: feeds.consecutive_failures,
         updatedAt: feeds.updated_at,
@@ -141,6 +142,7 @@ syncRoutes.get("/", async (c) => {
     lastError: row.lastError,
     lastCheckAt: row.lastCheckAt,
     folderId: row.folderId,
+    rank: row.rank,
     unsubscribed: row.unsubscribedAt !== null,
   }));
 

@@ -10,24 +10,25 @@ import {
   folders,
   getDb,
   insertChunkSize,
+  lastFeedRankInContainer,
   ranksAfter,
   resubscribeFeeds,
   whereInChunkSize,
 } from "@boreas/shared";
-import { desc, inArray, isNull } from "drizzle-orm";
+import { desc, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Env } from "../env";
 
 // Tailles de lot des écritures groupées, dérivées des limites D1 centralisées
 // (`@boreas/shared`), en tenant compte du nombre de **paramètres liés** par ligne
 // — pas du nombre de colonnes qu'on renseigne explicitement.
-// INSERT feeds : 6 paramètres par ligne. On fournit 4 valeurs (id, url, title,
-// folder_id), et Drizzle ajoute deux paramètres liés pour les défauts JS injectés
-// à l'INSERT : `consecutive_failures` (.default(0)) et `updated_at` ($defaultFn,
-// #69). (`created_at`, lui, a un défaut `sql\`…\`` rendu inline, donc sans
-// paramètre.) Sous-estimer ce compte fait dépasser la limite SQLite de 100
+// INSERT feeds : 7 paramètres par ligne. On fournit 5 valeurs (id, url, title,
+// folder_id, rank — #110), et Drizzle ajoute deux paramètres liés pour les défauts
+// JS injectés à l'INSERT : `consecutive_failures` (.default(0)) et `updated_at`
+// ($defaultFn, #69). (`created_at`, lui, a un défaut `sql\`…\`` rendu inline, donc
+// sans paramètre.) Sous-estimer ce compte fait dépasser la limite SQLite de 100
 // variables → « too many SQL variables » sur un import volumineux.
-const FEED_INSERT_CHUNK = insertChunkSize(6);
+const FEED_INSERT_CHUNK = insertChunkSize(7);
 // INSERT folders : 4 paramètres par ligne (id, name, rank + le `$defaultFn`
 // d'`updated_at` lié à l'INSERT, #69). `rank` (#108) est désormais fourni
 // explicitement à chaque ligne.
@@ -147,7 +148,9 @@ opmlRoutes.post("/import", async (c) => {
 
   // 3. Classe chaque entrée : ignorée (active), à réabonner (désabonnée), ou à
   // créer (inconnue). `parseOpml` a déjà dédupliqué par URL.
-  const toInsert: {
+  // Spécifications d'insertion **avant** attribution du rang : le rang est scopé
+  // au conteneur (ADR 0020), on le calcule en lot par conteneur cible plus bas.
+  const toInsertSpecs: {
     id: string;
     url: string;
     title: string | null;
@@ -175,11 +178,34 @@ opmlRoutes.post("/import", async (c) => {
       continue;
     }
 
-    toInsert.push({
+    toInsertSpecs.push({
       id: crypto.randomUUID(),
       url: entry.url,
       title: entry.title,
       folder_id: folderId,
+    });
+  }
+
+  // Rangs (#110, ADR 0020) scopés **par conteneur** : chaque Feed importé est placé
+  // en fin de SON conteneur cible (Folder ou zone sans-dossier), dans l'ordre
+  // d'apparition dans l'OPML. On regroupe les specs par conteneur, on lit une fois
+  // le dernier rang du conteneur, puis `ranksAfter` produit autant de clés que de
+  // feeds à y ajouter — appariées par `zip` pour une `rank: string` non nullable.
+  const specsByContainer = new Map<string | null, typeof toInsertSpecs>();
+  for (const spec of toInsertSpecs) {
+    const group = specsByContainer.get(spec.folder_id) ?? [];
+    group.push(spec);
+    specsByContainer.set(spec.folder_id, group);
+  }
+  const toInsert: ((typeof toInsertSpecs)[number] & { rank: string })[] = [];
+  for (const [containerId, specs] of specsByContainer) {
+    const lastRank = await lastFeedRankInContainer(db, containerId);
+    const ranks = ranksAfter(lastRank, specs.length);
+    specs.forEach((spec, i) => {
+      const rank = ranks[i];
+      if (rank === undefined)
+        throw new Error("rank manquant pour un Feed OPML");
+      toInsert.push({ ...spec, rank });
     });
   }
 
@@ -204,7 +230,25 @@ opmlRoutes.post("/import", async (c) => {
   // range le flux (clé non-null), pour ne pas désassigner sans raison.
   let reactivated = 0;
   for (const [folderId, ids] of resubscribeByFolder) {
+    // Quand l'OPML (ré)assigne le Feed à un Folder (`folderId` non-null), il
+    // change de conteneur : son rang historique, scopé à l'ancien conteneur,
+    // n'a plus de sens (ADR 0020, #110). On réattribue des rangs distincts en
+    // fin du conteneur cible — par Feed (et non en lot) pour éviter une collision
+    // entre les Feeds du même groupe. On lit le dernier rang du conteneur cible
+    // **avant** `resubscribeFeeds` (qui y déplace les Feeds) pour que les Feeds en
+    // cours de déplacement, encore porteurs de leur ancien rang, ne le faussent pas.
+    const ranks = folderId
+      ? ranksAfter(await lastFeedRankInContainer(db, folderId), ids.length)
+      : null;
     await resubscribeFeeds(db, ids, folderId ? { folderId } : undefined);
+    if (ranks) {
+      for (const [i, id] of ids.entries()) {
+        const rank = ranks[i];
+        if (rank === undefined)
+          throw new Error("rank manquant pour un Feed OPML réabonné");
+        await db.update(feeds).set({ rank }).where(eq(feeds.id, id));
+      }
+    }
     toBackfill.push(...ids);
     reactivated += ids.length;
   }

@@ -22,10 +22,11 @@ async function seedFeed(opts: {
   title?: string | null;
   folderId?: string | null;
   unsubscribedAt?: string | null;
+  rank?: string;
   updatedAt: number;
 }): Promise<void> {
   await env.DB.prepare(
-    "INSERT INTO feeds (id, url, title, folder_id, unsubscribed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO feeds (id, url, title, folder_id, unsubscribed_at, rank, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   )
     .bind(
       opts.id,
@@ -33,6 +34,7 @@ async function seedFeed(opts: {
       opts.title ?? `Flux ${opts.id}`,
       opts.folderId ?? null,
       opts.unsubscribedAt ?? null,
+      opts.rank ?? `a${opts.id}`,
       opts.updatedAt,
     )
     .run();
@@ -107,7 +109,7 @@ async function seedTombstone(opts: {
 interface SyncBody {
   upserts: {
     articles: { id: string }[];
-    feeds: { id: string }[];
+    feeds: { id: string; rank: string }[];
     folders: { id: string; rank: string }[];
   };
   tombstones: { entityType: string; entityId: string }[];
@@ -140,7 +142,12 @@ describe("GET /api/sync — garde", () => {
 describe("GET /api/sync — sync initiale (since absent)", () => {
   it("renvoie toutes les métadonnées (articles lus + non-lus, feeds, folders)", async () => {
     await seedFolder({ id: "fold-1", rank: "a0", updatedAt: 1000 });
-    await seedFeed({ id: "feed-1", folderId: "fold-1", updatedAt: 1000 });
+    await seedFeed({
+      id: "feed-1",
+      folderId: "fold-1",
+      rank: "b0",
+      updatedAt: 1000,
+    });
     await seedArticle({ id: "art-read", read: true, updatedAt: 2000 });
     await seedArticle({ id: "art-unread", read: false, updatedAt: 2000 });
 
@@ -155,6 +162,8 @@ describe("GET /api/sync — sync initiale (since absent)", () => {
     expect(body.upserts.folders.map((f) => f.id)).toEqual(["fold-1"]);
     // Le delta porte le rang fractionnaire du Folder (#108, ADR 0020).
     expect(body.upserts.folders[0].rank).toBe("a0");
+    // Le delta porte aussi le rang fractionnaire du Feed (#110, ADR 0020).
+    expect(body.upserts.feeds[0].rank).toBe("b0");
   });
 
   it("renvoie l'item article au format wire de la liste (avec feedName, saved, read)", async () => {

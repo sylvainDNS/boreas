@@ -24,7 +24,9 @@ import {
   folders,
   getDb,
   ingestFeed,
+  lastFeedRankInContainer,
   nowEpochMs,
+  rankBetween,
   resubscribeFeed,
   sqlUtcNow,
   writeTombstones,
@@ -77,7 +79,11 @@ async function subscribeToFeedUrl(
 
   // Crée le Feed puis backfill ses articles via le module d'ingestion partagé.
   const feedId = crypto.randomUUID();
-  await db.insert(feeds).values({ id: feedId, url });
+  // Rang scopé au conteneur (ADR 0020) : un abonnement naît « sans dossier »
+  // (`folder_id` NULL), on le place donc en fin de la zone sans-dossier — les
+  // Feeds classés dans un Folder ne bornent pas ce rang.
+  const rank = rankBetween(await lastFeedRankInContainer(db, null), null);
+  await db.insert(feeds).values({ id: feedId, url, rank });
 
   // ingestFeed ne lève pas sur un fetch KO (il renvoie status:"error"), mais une
   // panne D1/R2 en cours d'insertion peut remonter : on la traite comme un échec
@@ -200,7 +206,8 @@ export const feedsRoutes = new Hono<{ Bindings: Env }>();
  * Liste des Feeds avec leur santé (#11) : la sidebar du SPA y lit le badge
  * « en erreur ». `status` est **dérivé** de `consecutive_failures`
  * (≥ `ERROR_THRESHOLD` = en erreur) plutôt que stocké, pour éviter une donnée
- * redondante. Trié par titre (puis URL) pour un ordre stable.
+ * redondante. Trié par conteneur puis par rang manuel (ADR 0020) : la sidebar
+ * regroupe par Folder et respecte l'ordre choisi au sein de chacun.
  */
 feedsRoutes.get("/", async (c) => {
   const db = getDb(c.env.DB);
@@ -213,11 +220,16 @@ feedsRoutes.get("/", async (c) => {
       lastError: feeds.last_error,
       lastCheckAt: feeds.last_check_at,
       folderId: feeds.folder_id,
+      rank: feeds.rank,
     })
     .from(feeds)
     // Les Feeds désabonnés (#14) sont masqués de la sidebar.
     .where(isNull(feeds.unsubscribed_at))
-    .orderBy(asc(feeds.title), asc(feeds.url));
+    // Tri par conteneur (`folder_id`) puis par rang manuel au sein du conteneur
+    // (ADR 0020), `id` en départage pour un ordre **total déterministe** même si
+    // deux Feeds d'un même conteneur partageaient un rang (rééquilibrage en cours,
+    // conflit multi-appareils ADR 0018, ou backfill historique non couvert).
+    .orderBy(asc(feeds.folder_id), asc(feeds.rank), asc(feeds.id));
 
   return c.json({
     feeds: rows.map((row) => ({
@@ -229,6 +241,8 @@ feedsRoutes.get("/", async (c) => {
       lastCheckAt: row.lastCheckAt,
       // Folder de rattachement (null = non classé). La sidebar (#13) regroupe.
       folderId: row.folderId,
+      // Rang manuel au sein du conteneur (ADR 0020).
+      rank: row.rank,
     })),
   } satisfies FeedsResponse);
 });
@@ -365,6 +379,13 @@ feedsRoutes.post("/:id/refresh", async (c) => {
  * désigner un Folder existant (sinon 422 `folder_not_found`) — la FK D1
  * l'imposerait aussi, mais on renvoie une erreur métier plutôt qu'une 500.
  * La réponse n'écho que les champs effectivement modifiés.
+ *
+ * Le rang étant scopé au conteneur (ADR 0020), un **déplacement** (changement
+ * effectif de `folder_id`) réattribue un rang en **fin du conteneur cible**
+ * (Option A, #110) : le rang d'origine n'a plus de sens dans un autre conteneur.
+ * La pose à une position précise viendra avec le drag-and-drop (#112). Un
+ * renommage seul, ou un `folderId` identique au conteneur courant, ne touche pas
+ * le rang.
  */
 feedsRoutes.patch("/:id", async (c) => {
   const parsed = updateFeedSchema.safeParse(
@@ -394,10 +415,31 @@ feedsRoutes.patch("/:id", async (c) => {
   const set: {
     title?: string;
     folder_id?: string | null;
+    rank?: string;
     updated_at: number;
   } = { updated_at: nowEpochMs() };
   if (parsed.data.title !== undefined) set.title = parsed.data.title;
-  if (parsed.data.folderId !== undefined) set.folder_id = parsed.data.folderId;
+
+  // Déplacement de conteneur : on réattribue un rang en fin du conteneur cible
+  // (ADR 0020, Option A) — mais seulement si le conteneur change réellement, pour
+  // ne pas re-ranker un `folderId` identique au courant. On lit le `folder_id`
+  // courant (qui sert aussi de signal d'existence : 404 sinon).
+  if (parsed.data.folderId !== undefined) {
+    const [current] = await db
+      .select({ folderId: feeds.folder_id })
+      .from(feeds)
+      .where(eq(feeds.id, id))
+      .limit(1);
+    if (!current) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    set.folder_id = parsed.data.folderId;
+    if (current.folderId !== parsed.data.folderId) {
+      // Réattribution en fin du conteneur cible (Folder ou zone sans-dossier).
+      const lastRank = await lastFeedRankInContainer(db, parsed.data.folderId);
+      set.rank = rankBetween(lastRank, null);
+    }
+  }
 
   const updated = await db
     .update(feeds)

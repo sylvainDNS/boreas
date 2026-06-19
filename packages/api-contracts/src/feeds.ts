@@ -35,6 +35,13 @@ export const feedSchema = z.object({
   lastError: z.string().nullable(),
   lastCheckAt: z.string().nullable(),
   folderId: z.string().nullable(),
+  /**
+   * Rang fractionnaire (#110, ADR 0020), scopé au conteneur (le Folder
+   * `folderId`, ou la zone « sans dossier » si `folderId` est `null`). Sert à
+   * l'ordre manuel des Feeds au sein de leur conteneur. Se propage au wire de
+   * sync via `syncFeedSchema.extend`.
+   */
+  rank: z.string(),
 });
 export type Feed = z.infer<typeof feedSchema>;
 

@@ -162,6 +162,79 @@ describe("CRUD /api/folders (#13)", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("réordonne un Folder via PATCH {rank} : écrit le rang verbatim et ré-écho (ADR 0020)", async () => {
+    await seedFolder("a", "Alpha", "a0");
+    await seedFolder("b", "Bravo", "a1");
+    await seedFolder("c", "Charlie", "a2");
+
+    // Déplace "a" entre "b" et "a2" : le client a calculé un rang intercalé.
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/folders/a`,
+      authed({ method: "PATCH", body: JSON.stringify({ rank: "a1V" }) }),
+    );
+    expect(res.status).toBe(200);
+    // Écho = folderSchema complet relu {id, name, rank}, rang écrit verbatim.
+    expect(await res.json()).toEqual({ id: "a", name: "Alpha", rank: "a1V" });
+
+    // La liste se re-trie par rang : Bravo, Alpha, Charlie.
+    const list = await SELF.fetch(`${ORIGIN}/api/folders`, authed());
+    const body = (await list.json()) as { folders: { name: string }[] };
+    expect(body.folders.map((f) => f.name)).toEqual([
+      "Bravo",
+      "Alpha",
+      "Charlie",
+    ]);
+  });
+
+  it("PATCH {rank} bumpe updated_at et ne réécrit qu'une seule ligne", async () => {
+    await seedFolder("a", "Alpha", "a0");
+    await seedFolder("b", "Bravo", "a1");
+    // Force des updated_at bas pour observer le bump sélectif.
+    await env.DB.prepare("UPDATE folders SET updated_at = 1").run();
+
+    await SELF.fetch(
+      `${ORIGIN}/api/folders/a`,
+      authed({ method: "PATCH", body: JSON.stringify({ rank: "a2" }) }),
+    );
+
+    const rows = await env.DB.prepare(
+      "SELECT id, rank, updated_at FROM folders ORDER BY id",
+    ).all<{ id: string; rank: string; updated_at: number }>();
+    const byId = new Map(rows.results.map((r) => [r.id, r]));
+    // Seule la ligne déplacée est réécrite (rang + updated_at).
+    expect(byId.get("a")?.rank).toBe("a2");
+    expect(byId.get("a")?.updated_at).toBeGreaterThan(1);
+    expect(byId.get("b")?.rank).toBe("a1");
+    expect(byId.get("b")?.updated_at).toBe(1);
+  });
+
+  it("PATCH {name} seul n'altère pas le rang", async () => {
+    await seedFolder("a", "Alpha", "a5");
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/folders/a`,
+      authed({ method: "PATCH", body: JSON.stringify({ name: "Renommé" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "a", name: "Renommé", rank: "a5" });
+  });
+
+  it("PATCH {} (aucun champ) → 400", async () => {
+    await seedFolder("a", "Alpha", "a0");
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/folders/a`,
+      authed({ method: "PATCH", body: JSON.stringify({}) }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH {rank} sur un id inconnu → 404", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/folders/nope`,
+      authed({ method: "PATCH", body: JSON.stringify({ rank: "a0" }) }),
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("supprime un Folder en désassignant ses Feeds (pas de désabonnement)", async () => {
     await seedFolder("fold-1", "Tech");
     await seedFeed("feed-1", { folderId: "fold-1" });

@@ -4,6 +4,7 @@ import {
   type FoldersResponse,
   folderNameSchema,
   type OkResponse,
+  updateFolderSchema,
 } from "@boreas/api-contracts";
 import {
   feeds,
@@ -74,9 +75,16 @@ foldersRoutes.post("/", async (c) => {
   );
 });
 
-/** Renommage d'un Folder. 404 si l'id est inconnu. */
+/**
+ * Renommage (#13) et/ou réordonnancement (#109) d'un Folder. Le corps porte
+ * `name` et/ou `rank` (au moins un, sinon 400). Le `rank` est calculé côté client
+ * (`rankBetween` des voisins, ADR 0020) et écrit **verbatim** : le serveur ne
+ * recalcule rien et ne touche que la ligne ciblée (une seule ligne réécrite,
+ * AC #109). `updated_at` est toujours bumpé (mutation de domaine, #69, ADR 0018).
+ * 404 si l'id est inconnu. L'écho est le `folderSchema` complet relu.
+ */
 foldersRoutes.patch("/:id", async (c) => {
-  const parsed = folderNameSchema.safeParse(
+  const parsed = updateFolderSchema.safeParse(
     await c.req.json().catch(() => ({})),
   );
   if (!parsed.success) {
@@ -85,21 +93,28 @@ foldersRoutes.patch("/:id", async (c) => {
   const id = c.req.param("id");
   const db = getDb(c.env.DB);
 
-  // Le renommage est une mutation de domaine → bump `updated_at` (#69, ADR 0018).
-  // Le rang n'est pas touché par un renommage ; on le relit pour l'écho de réponse.
+  // Set partiel : on n'écrit que les champs présents ; `updated_at` toujours bumpé.
+  const set: { name?: string; rank?: string; updated_at: number } = {
+    updated_at: nowEpochMs(),
+  };
+  if (parsed.data.name !== undefined) set.name = parsed.data.name;
+  if (parsed.data.rank !== undefined) set.rank = parsed.data.rank;
+
+  // `returning` relit name+rank (le champ non modifié garde sa valeur en base)
+  // pour ré-écho du `folderSchema` complet.
   const updated = await db
     .update(folders)
-    .set({ name: parsed.data.name, updated_at: nowEpochMs() })
+    .set(set)
     .where(eq(folders.id, id))
-    .returning({ id: folders.id, rank: folders.rank });
+    .returning({ id: folders.id, name: folders.name, rank: folders.rank });
 
   const row = updated[0];
   if (!row) {
     return c.json({ error: "not_found" }, 404);
   }
   return c.json({
-    id,
-    name: parsed.data.name,
+    id: row.id,
+    name: row.name,
     rank: row.rank,
   } satisfies FolderRenamedResponse);
 });

@@ -147,6 +147,27 @@ describe("FolderTree", () => {
     ).toBeDisabled();
   });
 
+  it("rend plusieurs dossiers sortables dans l'ordre fourni (#109)", async () => {
+    renderTree({
+      folders: [
+        { id: "f1", name: "Alpha", rank: "a0" },
+        { id: "f2", name: "Bravo", rank: "a1" },
+        { id: "f3", name: "Charlie", rank: "a2" },
+      ],
+      feeds: [],
+    });
+    // Les trois dossiers sont montés (un useSortable par dossier, sans crash) et
+    // dans l'ordre de la liste triée par rang fourni par la Sidebar.
+    const links = await screen.findAllByRole("link", {
+      name: /Alpha|Bravo|Charlie/,
+    });
+    expect(links.map((l) => l.textContent?.replace(/📁/, ""))).toEqual([
+      "Alpha",
+      "Bravo",
+      "Charlie",
+    ]);
+  });
+
   it("hors-ligne : désactive renommer/supprimer un dossier", async () => {
     const { user } = renderTree({ online: false });
     await user.click(

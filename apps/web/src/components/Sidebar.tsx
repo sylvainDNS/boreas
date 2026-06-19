@@ -29,12 +29,13 @@ import {
   resolveDropTarget,
   resolveFeedDragEnd,
   type SidebarDialog,
+  unreadNameClass,
 } from "./sidebar/sidebar-model";
 import { useFeedLifecycle } from "./sidebar/use-feed-lifecycle";
 import { useFeedMoveAndRank } from "./sidebar/use-feed-move-and-rank";
 import { useFeedReorder } from "./sidebar/use-feed-reorder";
 import { useFolderReorder } from "./sidebar/use-folder-reorder";
-import { CountBadge } from "./ui/Badge";
+import { CountBadge, UnreadDot } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
 
 const itemBase =
@@ -230,18 +231,39 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           />
         </nav>
 
-        {/* Fantôme suivant le curseur pendant le drag : libellé du Feed (déplacement)
-            ou nom du dossier (réordonnancement, #109), selon le type de la source. */}
+        {/* Fantôme suivant le curseur pendant le drag (#109). Reproduit la ligne
+            d'origine (#114) : dossier = chevron + 📁 + nom (gras si non-lus) +
+            point ; flux = nom seul (gras si non-lus), à l'image de FeedRow. */}
         <DragOverlay>
           {(source) => {
-            const label =
-              source.type === FOLDER_DRAG_TYPE
-                ? (source.data as FolderDragData | undefined)?.name
-                : (source.data as FeedDragData | undefined)?.label;
-            if (label === undefined) return null;
+            if (source.type === FOLDER_DRAG_TYPE) {
+              const folder = source.data as FolderDragData | undefined;
+              if (folder === undefined) return null;
+              return (
+                <div className={`${itemBase} bg-surface text-text shadow-pop`}>
+                  <span
+                    aria-hidden
+                    className="grid size-5 shrink-0 place-items-center text-muted text-xs"
+                  >
+                    {folder.isExpanded ? "▾" : "▸"}
+                  </span>
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <span aria-hidden>📁</span>
+                    <span
+                      className={`truncate ${unreadNameClass(folder.hasUnread)}`}
+                    >
+                      {folder.name}
+                    </span>
+                  </span>
+                  <UnreadDot hasUnread={folder.hasUnread} />
+                </div>
+              );
+            }
+            const feed = source.data as FeedDragData | undefined;
+            if (feed === undefined) return null;
             return (
               <div className={`${itemBase} bg-surface text-text shadow-pop`}>
-                <span className="truncate">{label}</span>
+                <span className="truncate">{feed.label}</span>
               </div>
             );
           }}

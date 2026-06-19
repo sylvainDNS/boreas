@@ -11,11 +11,14 @@ import type { Folder } from "../../lib/folders";
 export const FOLDER_DRAG_TYPE = "folder";
 
 /**
- * Données portées par un dossier sortable (#109). `name` alimente le fantôme du
- * `DragOverlay` pendant le réordonnancement, sans relecture du cache.
+ * Données portées par un dossier sortable (#109). Alimentent le fantôme du
+ * `DragOverlay` pour qu'il reproduise la ligne d'origine (#114), sans relecture
+ * du cache : `name`, état non-lu (gras + point) et état déplié (chevron).
  */
 export interface FolderDragData {
   name: string;
+  hasUnread: boolean;
+  isExpanded: boolean;
 }
 
 /**

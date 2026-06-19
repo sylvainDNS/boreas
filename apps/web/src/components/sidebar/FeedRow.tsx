@@ -2,8 +2,9 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { type Feed, feedLabel } from "../../lib/feeds";
-import { menuItemClass, RowMenu } from "../RowMenu";
+import { menuItemClass, RowMenu, rowMenuTriggerClass } from "../RowMenu";
 import { ErrorBadge, UnreadDot } from "../ui/Badge";
+import { useRowMenu } from "../useRowMenu";
 import {
   FEED_DRAG_TYPE,
   type FeedDragData,
@@ -46,6 +47,7 @@ export function FeedRow({
     matchRoute({ to: "/feeds/$feedId", params: { feedId: feed.id } }),
   );
   const label = feedLabel(feed);
+  const menu = useRowMenu();
 
   // Sortable (#111) : le Feed est à la fois *source* d'un réordonnancement
   // **intra-conteneur** (même `group`) et d'un déplacement **inter-conteneur**
@@ -73,8 +75,11 @@ export function FeedRow({
   });
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: clic droit / Shift+F10 sur toute la ligne ne sont qu'une commodité ; l'accès clavier passe par le bouton déclencheur focalisable (#114).
     <div
       ref={ref}
+      onContextMenu={menu.onContextMenu}
+      onKeyDown={menu.onKeyDown}
       className={`group ${itemBase} ${isActive ? itemActive : ""} ${
         isDragSource ? "opacity-50" : ""
       }`}
@@ -91,41 +96,56 @@ export function FeedRow({
       </Link>
       {feed.status === "error" && <ErrorBadge detail={feed.lastError} />}
       <UnreadDot hasUnread={unread > 0} />
-      <RowMenu
-        label={`Actions pour ${label}`}
-        triggerClassName="opacity-60 transition-opacity group-hover:opacity-100"
+      {/* Plus de kebab permanent (#114) : déclencheur révélé au focus clavier
+          (ligne ou bouton), invisible au repos. Clic droit / Shift+F10 / touche
+          Menu ouvrent le même menu via `useRowMenu`. */}
+      <button
+        type="button"
+        {...menu.triggerProps}
+        aria-label={`Actions pour ${label}`}
+        title={`Actions pour ${label}`}
+        className={rowMenuTriggerClass}
       >
-        {(close) => (
-          <>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!online}
-              title={online ? undefined : OFFLINE_OP_TITLE}
-              className={menuItemClass}
-              onClick={() => {
-                close();
-                onRequestDialog({ kind: "renameFeed", feed });
-              }}
-            >
-              Renommer…
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!online}
-              title={online ? undefined : OFFLINE_OP_TITLE}
-              className={menuItemClass}
-              onClick={() => {
-                close();
-                onRequestDialog({ kind: "unsubscribeFeed", feed });
-              }}
-            >
-              Se désabonner
-            </button>
-          </>
-        )}
-      </RowMenu>
+        ⋯
+      </button>
+      {menu.position && (
+        <RowMenu
+          label={`Actions pour ${label}`}
+          position={menu.position}
+          onClose={menu.close}
+        >
+          {(close) => (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!online}
+                title={online ? undefined : OFFLINE_OP_TITLE}
+                className={menuItemClass}
+                onClick={() => {
+                  close();
+                  onRequestDialog({ kind: "renameFeed", feed });
+                }}
+              >
+                Renommer…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!online}
+                title={online ? undefined : OFFLINE_OP_TITLE}
+                className={menuItemClass}
+                onClick={() => {
+                  close();
+                  onRequestDialog({ kind: "unsubscribeFeed", feed });
+                }}
+              >
+                Se désabonner
+              </button>
+            </>
+          )}
+        </RowMenu>
+      )}
     </div>
   );
 }

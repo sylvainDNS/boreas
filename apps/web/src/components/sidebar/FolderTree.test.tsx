@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "../../lib/api";
 import type { Feed } from "../../lib/feeds";
@@ -151,10 +151,23 @@ describe("FolderTree", () => {
     ).toBeDisabled();
   });
 
-  it("conserve le kebab d'actions du dossier (non-régression #113)", async () => {
+  it("déclencheur d'actions masqué au repos, clic droit ouvre le menu (#114)", async () => {
     renderTree();
+    const trigger = await screen.findByRole("button", {
+      name: /Actions pour Tech/,
+    });
+    // Plus de kebab permanent : invisible tant que la ligne n'a pas le focus.
+    expect(trigger.className).toContain("opacity-0");
+
+    const row = trigger.closest(".group");
+    if (!row) throw new Error("ligne dossier introuvable");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 30, clientY: 40 });
     expect(
-      await screen.findByRole("button", { name: /Actions pour Tech/ }),
+      screen.getByRole("menuitem", { name: "Renommer…" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: "Supprimer" }),
     ).toBeInTheDocument();
   });
 

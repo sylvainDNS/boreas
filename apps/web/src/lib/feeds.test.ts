@@ -5,6 +5,7 @@ import { ARTICLES_COUNTS_KEY, ARTICLES_LIST_KEY } from "./articles";
 import {
   FEEDS_LIST_KEY,
   type Feed,
+  moveAndRankFeedMutationOptions,
   reorderFeedMutationOptions,
   unsubscribeFeedMutationOptions,
 } from "./feeds";
@@ -127,6 +128,92 @@ describe("reorderFeedMutationOptions (#111)", () => {
     expect(keys).toContainEqual(FEEDS_LIST_KEY);
     expect(keys).not.toContainEqual(ARTICLES_COUNTS_KEY);
     expect(keys).not.toContainEqual(ARTICLES_LIST_KEY);
+  });
+});
+
+describe("moveAndRankFeedMutationOptions (#112)", () => {
+  it("PATCH /feeds/:id {folderId, rank} en un seul appel atomique", async () => {
+    mockedFetch.mockResolvedValueOnce({
+      id: "u0",
+      folderId: "fo1",
+      rank: "a0V",
+    });
+    const { client } = seedFeeds();
+    const opts = moveAndRankFeedMutationOptions(client);
+
+    await opts.mutationFn({ id: "u0", folderId: "fo1", rank: "a0V" });
+    expect(mockedFetch).toHaveBeenCalledWith("/feeds/u0", {
+      method: "PATCH",
+      body: JSON.stringify({ folderId: "fo1", rank: "a0V" }),
+    });
+  });
+
+  it("onMutate : réécrit folderId + rang du feed et re-trie la liste GLOBALE", async () => {
+    const { client } = seedFeeds();
+    const opts = moveAndRankFeedMutationOptions(client);
+
+    // Déplace "u0" (sans dossier) dans "fo1" entre c0 (a0) et c1 (a1).
+    await opts.onMutate({ id: "u0", folderId: "fo1", rank: "a0V" });
+
+    // u1 reste seul sans dossier ; u0 s'intercale dans fo1 entre c0 et c1.
+    expect(feedOrder(client).map((f) => f.id)).toEqual([
+      "u1",
+      "c0",
+      "u0",
+      "c1",
+    ]);
+    const moved = client
+      .getQueryData<Feed[]>(FEEDS_LIST_KEY)
+      ?.find((f) => f.id === "u0");
+    expect(moved?.folderId).toBe("fo1");
+    expect(moved?.rank).toBe("a0V");
+  });
+
+  it("onError : restaure folderId ET rang du seul feed concerné, puis re-trie", async () => {
+    const { client } = seedFeeds();
+    const opts = moveAndRankFeedMutationOptions(client);
+
+    const context = await opts.onMutate({
+      id: "u0",
+      folderId: "fo1",
+      rank: "a0V",
+    });
+    expect(feedOrder(client).map((f) => f.id)).toEqual([
+      "u1",
+      "c0",
+      "u0",
+      "c1",
+    ]);
+
+    opts.onError(
+      new Error("boom"),
+      { id: "u0", folderId: "fo1", rank: "a0V" },
+      context,
+    );
+
+    // Retour à l'état initial : u0 redevient sans dossier avec son rang a0.
+    const restored = client
+      .getQueryData<Feed[]>(FEEDS_LIST_KEY)
+      ?.find((f) => f.id === "u0");
+    expect(restored?.folderId).toBeNull();
+    expect(restored?.rank).toBe("a0");
+    expect(feedOrder(client).map((f) => f.id)).toEqual([
+      "u0",
+      "u1",
+      "c0",
+      "c1",
+    ]);
+  });
+
+  it("onSettled : invalide feeds + listes + compteurs (comme le move #13)", () => {
+    const { client, invalidateQueries } = fakeQueryClient();
+    const opts = moveAndRankFeedMutationOptions(client);
+
+    opts.onSettled();
+    const keys = invalidateQueries.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toContainEqual(FEEDS_LIST_KEY);
+    expect(keys).toContainEqual(ARTICLES_LIST_KEY);
+    expect(keys).toContainEqual(ARTICLES_COUNTS_KEY);
   });
 });
 

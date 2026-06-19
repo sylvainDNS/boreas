@@ -31,6 +31,7 @@ import {
   type SidebarDialog,
 } from "./sidebar/sidebar-model";
 import { useFeedLifecycle } from "./sidebar/use-feed-lifecycle";
+import { useFeedMoveAndRank } from "./sidebar/use-feed-move-and-rank";
 import { useFeedReorder } from "./sidebar/use-feed-reorder";
 import { useFolderReorder } from "./sidebar/use-folder-reorder";
 import { CountBadge } from "./ui/Badge";
@@ -89,6 +90,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const lifecycle = useFeedLifecycle();
   const folderReorder = useFolderReorder();
   const feedReorder = useFeedReorder();
+  const feedMoveAndRank = useFeedMoveAndRank();
 
   const unreadByFeed = useMemo(
     () => new Map(counts.data?.byFeed.map((f) => [f.feedId, f.count])),
@@ -117,14 +119,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       : (feedsByFolder.get(folderId) ?? []);
   }
 
-  // Fin de drag : on route selon la **source** (#109/#111). Source dossier
+  // Fin de drag : on route selon la **source** (#109/#111/#112). Source dossier
   // (`FOLDER_DRAG_TYPE`) → réordonnancement entre dossiers (#109). Source Feed :
   // si le conteneur n'a pas changé (`initialGroup === group`, dnd-kit projette le
   // group de la cible sur le sortable) → **réordonnancement intra-conteneur**
-  // (#111, `computeFeedRank`) ; si le conteneur change → **déplacement** vers un
-  // autre Folder / désassignation (chemin #13, par `resolveDropTarget(target)`).
-  // On ignore l'annulation et les drops hors cible. **Online-only** (ADR 0018) :
-  // hors-ligne, on no-op (le drag est aussi désactivé côté sources).
+  // (#111, `computeFeedRank`) ; si le conteneur change sur un sortable (group
+  // projeté + index) → **déplacement à position précise** (#112,
+  // `move-and-rank`, un PATCH `{folderId, rank}` atomique) ; en repli (en-tête
+  // dossier non-sortable) → **déplacement simple** vers un autre Folder /
+  // désassignation (chemin #13). On ignore l'annulation et les drops hors cible.
+  // **Online-only** (ADR 0018) : hors-ligne, on no-op (drag aussi désactivé).
   function handleDragEnd(event: DragEndEvent) {
     if (!online) return;
     const { source, target } = event.operation;
@@ -177,6 +181,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       feedsInContainer,
     );
     if (action.kind === "reorder") feedReorder.reorder(action.id, action.rank);
+    else if (action.kind === "move-and-rank")
+      feedMoveAndRank.moveAndRank(action.id, action.folderId, action.rank);
     else if (action.kind === "move") lifecycle.move(action.id, action.folderId);
   }
 

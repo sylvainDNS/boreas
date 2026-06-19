@@ -1,7 +1,7 @@
 import { rankBetween } from "@boreas/shared/rank";
 import { describe, expect, it } from "vitest";
 import type { Feed } from "../../lib/feeds";
-import { computeFeedRank } from "./feed-reorder";
+import { computeFeedRank, rankAtInsertion } from "./feed-reorder";
 
 /**
  * Construit une liste de Feeds (d'un même conteneur) dont les rangs sont
@@ -107,5 +107,50 @@ describe("computeFeedRank", () => {
     const c = rankAt(list, 2);
     expect(b < (rank ?? "")).toBe(true);
     expect((rank ?? "") < c).toBe(true);
+  });
+});
+
+describe("rankAtInsertion (#112 dépose inter-conteneur à position précise)", () => {
+  it("insertion en milieu : rang strictement entre les voisins encadrants", () => {
+    const list = feeds(["a", "b", "c"]);
+    // Insère un item venu d'un AUTRE conteneur à l'index 1 (entre a et b).
+    const rank = rankAtInsertion(list, 1);
+    expect(rank).not.toBeNull();
+    const a = rankAt(list, 0);
+    const b = rankAt(list, 1);
+    expect(a < (rank ?? "")).toBe(true);
+    expect((rank ?? "") < b).toBe(true);
+  });
+
+  it("tête (index=0) : before=null → rang avant le premier", () => {
+    const list = feeds(["a", "b", "c"]);
+    const rank = rankAtInsertion(list, 0);
+    expect(rank).not.toBeNull();
+    const a = rankAt(list, 0);
+    expect((rank ?? "") < a).toBe(true);
+  });
+
+  it("queue (index=len) : after=null → rang après le dernier", () => {
+    const list = feeds(["a", "b", "c"]);
+    const rank = rankAtInsertion(list, list.length);
+    expect(rank).not.toBeNull();
+    const last = rankAt(list, list.length - 1);
+    expect(last < (rank ?? "")).toBe(true);
+  });
+
+  it("conteneur cible vide : rankBetween(null, null) → une clé non nulle", () => {
+    const rank = rankAtInsertion([], 0);
+    expect(rank).not.toBeNull();
+    expect(typeof rank).toBe("string");
+  });
+
+  it("voisins encadrants de rang égal/inversé : abandonne (null, pas de crash)", () => {
+    // Deux feeds du conteneur cible partagent un rang (ADR 0018) : on insère
+    // entre eux (index 1) → before (a1) >= after (a1), non intercalable.
+    const list: Feed[] = [
+      { ...feeds(["x"])[0], id: "a", rank: "a1" },
+      { ...feeds(["x"])[0], id: "b", rank: "a1" },
+    ] as Feed[];
+    expect(rankAtInsertion(list, 1)).toBeNull();
   });
 });

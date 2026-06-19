@@ -365,6 +365,58 @@ describe("Rang lexorank des Feeds (#110, ADR 0020)", () => {
     expect(res.status).toBe(200);
     expect(await feedRank("feed-1")).toBe("a3");
   });
+
+  it("PATCH /api/feeds/:id écrit un `rank` explicite verbatim sans toucher folder_id (#111)", async () => {
+    await seedFolder("fold-1");
+    await seedFeed("feed-1", { folderId: "fold-1", rank: "a5" });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/feed-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ rank: "a3" }) }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; rank?: string };
+    expect(body.rank).toBe("a3");
+    // Rang écrit verbatim (pas de rééquilibrage) ; le conteneur reste fold-1.
+    expect(await feedRank("feed-1")).toBe("a3");
+    const row = await env.DB.prepare(
+      "SELECT folder_id AS f FROM feeds WHERE id = ?",
+    )
+      .bind("feed-1")
+      .first<{ f: string | null }>();
+    expect(row?.f).toBe("fold-1");
+  });
+
+  it("PATCH /api/feeds/:id avec {folderId, rank} : le rang explicite prime sur la réattribution auto (#111/#112)", async () => {
+    await seedFolder("fold-1");
+    await seedFeed("resident", { folderId: "fold-1", rank: "a5" });
+    await seedFeed("mover", { folderId: null, rank: "z0" });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/mover`,
+      authed({
+        method: "PATCH",
+        body: JSON.stringify({ folderId: "fold-1", rank: "a3" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    // Conteneur changé ET rang explicite respecté (a3, pas une fin de conteneur).
+    expect(await feedRank("mover")).toBe("a3");
+    const row = await env.DB.prepare(
+      "SELECT folder_id AS f FROM feeds WHERE id = ?",
+    )
+      .bind("mover")
+      .first<{ f: string | null }>();
+    expect(row?.f).toBe("fold-1");
+  });
+
+  it("PATCH /api/feeds/:id renvoie 404 sur un feed inconnu (rank seul)", async () => {
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/inconnu`,
+      authed({ method: "PATCH", body: JSON.stringify({ rank: "a3" }) }),
+    );
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("POST /api/feeds/discover — auto-découverte", () => {

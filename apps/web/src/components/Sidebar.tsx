@@ -24,11 +24,14 @@ import { SidebarDialogs } from "./sidebar/SidebarDialogs";
 import { SidebarSearch } from "./sidebar/SidebarSearch";
 import {
   type FeedDragData,
+  type FeedDragSource,
   groupFeedsByFolder,
   resolveDropTarget,
+  resolveFeedDragEnd,
   type SidebarDialog,
 } from "./sidebar/sidebar-model";
 import { useFeedLifecycle } from "./sidebar/use-feed-lifecycle";
+import { useFeedReorder } from "./sidebar/use-feed-reorder";
 import { useFolderReorder } from "./sidebar/use-folder-reorder";
 import { CountBadge } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
@@ -85,6 +88,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   const lifecycle = useFeedLifecycle();
   const folderReorder = useFolderReorder();
+  const feedReorder = useFeedReorder();
 
   const unreadByFeed = useMemo(
     () => new Map(counts.data?.byFeed.map((f) => [f.feedId, f.count])),
@@ -103,11 +107,24 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     [foldersData, feedsData],
   );
 
-  // Fin de drag : on route selon le **type de la source** (#109). Source dossier
-  // (`FOLDER_DRAG_TYPE`) → réordonnancement entre dossiers ; sinon, chemin Feed
-  // (déplacement vers un dossier / désassignation). On ignore l'annulation et les
-  // drops hors cible. **Online-only** (ADR 0018) : hors-ligne, on no-op (le drag
-  // est aussi désactivé côté sources, double sécurité).
+  // Liste **triée** des Feeds d'un conteneur (Folder ou zone « sans dossier »),
+  // telle que rendue dans la sidebar : c'est sur ses index que `computeFeedRank`
+  // raisonne. `null` = zone sans dossier. Le tri vient de `GET /api/feeds`
+  // (`ORDER BY folder_id, rank, id`), préservé par `groupFeedsByFolder`.
+  function feedsInContainer(folderId: string | null) {
+    return folderId === null
+      ? unfiledFeeds
+      : (feedsByFolder.get(folderId) ?? []);
+  }
+
+  // Fin de drag : on route selon la **source** (#109/#111). Source dossier
+  // (`FOLDER_DRAG_TYPE`) → réordonnancement entre dossiers (#109). Source Feed :
+  // si le conteneur n'a pas changé (`initialGroup === group`, dnd-kit projette le
+  // group de la cible sur le sortable) → **réordonnancement intra-conteneur**
+  // (#111, `computeFeedRank`) ; si le conteneur change → **déplacement** vers un
+  // autre Folder / désassignation (chemin #13, par `resolveDropTarget(target)`).
+  // On ignore l'annulation et les drops hors cible. **Online-only** (ADR 0018) :
+  // hors-ligne, on no-op (le drag est aussi désactivé côté sources).
   function handleDragEnd(event: DragEndEvent) {
     if (!online) return;
     const { source, target } = event.operation;
@@ -127,12 +144,40 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       return;
     }
 
-    // Chemin Feed : nécessite une cible (dossier ou zone « sans dossier »).
-    if (!target) return;
-    const targetFolderId = resolveDropTarget(String(target.id));
+    // Chemin Feed : `resolveFeedDragEnd` (pur, testé) discrimine
+    // réordonnancement intra-conteneur (#111) et déplacement (#13). On lui passe
+    // une vue découplée des types dnd-kit. `target` (dossier ou zone « sans
+    // dossier ») sert au move ; `undefined` = drop hors zone.
     const data = source.data as FeedDragData | undefined;
-    if (data?.folderId === targetFolderId) return;
-    lifecycle.move(String(source.id), targetFolderId);
+    const dragSource: FeedDragSource = isSortable(source)
+      ? {
+          id: String(source.id),
+          isSortable: true,
+          initialGroup:
+            source.initialGroup === undefined
+              ? undefined
+              : String(source.initialGroup),
+          group: source.group === undefined ? undefined : String(source.group),
+          initialIndex: source.initialIndex,
+          index: source.index,
+          folderId: data?.folderId ?? null,
+        }
+      : {
+          id: String(source.id),
+          isSortable: false,
+          folderId: data?.folderId ?? null,
+        };
+    const targetFolderId = target
+      ? resolveDropTarget(String(target.id))
+      : undefined;
+
+    const action = resolveFeedDragEnd(
+      dragSource,
+      targetFolderId,
+      feedsInContainer,
+    );
+    if (action.kind === "reorder") feedReorder.reorder(action.id, action.rank);
+    else if (action.kind === "move") lifecycle.move(action.id, action.folderId);
   }
 
   return (

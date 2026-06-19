@@ -46,6 +46,8 @@ function renderRow(
   const result = renderWithApp(
     <FeedRow
       feed={feed}
+      index={0}
+      group="sidebar:unfiled"
       unread={over.unread ?? 0}
       onRequestDialog={onRequestDialog}
       online={over.online ?? true}

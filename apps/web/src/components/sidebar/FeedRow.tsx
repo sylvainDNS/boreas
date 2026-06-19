@@ -1,4 +1,4 @@
-import { useDraggable } from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { type Feed, feedLabel } from "../../lib/feeds";
@@ -23,12 +23,18 @@ import {
  */
 export function FeedRow({
   feed,
+  index,
+  group,
   unread,
   onRequestDialog,
   onNavigate,
   online,
 }: {
   feed: Feed;
+  /** Position du Feed dans la liste **triée** de son conteneur (#111). */
+  index: number;
+  /** Identité du conteneur sortable (id du Folder, ou sentinelle « sans dossier »). */
+  group: string;
   unread: number;
   onRequestDialog: (dialog: SidebarDialog) => void;
   onNavigate?: () => void;
@@ -41,22 +47,28 @@ export function FeedRow({
   );
   const label = feedLabel(feed);
 
-  // Draggable vers les dossiers / la zone « sans dossier ». Le seuil
-  // d'activation du PointerSensor (cf. Sidebar) distingue le clic (navigation via
-  // le Link) du drag ; `data` porte le folderId courant + le libellé du fantôme.
-  // Identité mémoïsée sur des primitives : dnd-kit compare `data` par `Object.is`
-  // et réassigne le signal du draggable à chaque changement — sans ça, chaque
-  // render (poll 30s, changement de route) le réécrirait inutilement.
+  // Sortable (#111) : le Feed est à la fois *source* d'un réordonnancement
+  // **intra-conteneur** (même `group`) et d'un déplacement **inter-conteneur**
+  // (#13, group différent à la dépose) ; il reste *cible* d'un autre Feed
+  // (`accept: FEED_DRAG_TYPE`). `onDragEnd` (Sidebar) discrimine reorder/move sur
+  // `source.initialGroup` vs `source.group`. Le seuil du PointerSensor (cf.
+  // Sidebar) distingue clic (navigation via le Link) et drag ; `data` porte le
+  // folderId courant + le libellé du fantôme. Identité mémoïsée sur des
+  // primitives : dnd-kit compare `data` par `Object.is` et réassigne le signal à
+  // chaque changement — sans ça, chaque render (poll 30s, route) le réécrirait.
   const dragData = useMemo<FeedDragData>(
     () => ({ folderId: feed.folderId, label }),
     [feed.folderId, label],
   );
-  const { ref, isDragSource } = useDraggable<FeedDragData>({
+  const { ref, isDragSource } = useSortable<FeedDragData>({
     id: feed.id,
+    index,
+    group,
     type: FEED_DRAG_TYPE,
+    accept: FEED_DRAG_TYPE,
     data: dragData,
-    // Déplacement = op online-only (ADR 0018) : hors-ligne, le drag est désactivé
-    // (et `onDragEnd` no-op en secours).
+    // Réordonnancement/déplacement = ops online-only (ADR 0018) : hors-ligne, le
+    // drag est désactivé (et `onDragEnd` no-op en secours).
     disabled: !online,
   });
 

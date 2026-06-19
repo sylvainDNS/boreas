@@ -167,6 +167,97 @@ export function updateFeedMutationOptions(queryClient: QueryClient) {
   };
 }
 
+/** Champs d'un réordonnancement de Feed (#111) : id ciblé + nouveau rang. */
+export interface ReorderFeedInput {
+  id: string;
+  /** Rang fractionnaire calculé côté client (`rankBetween` des voisins, ADR 0020). */
+  rank: string;
+}
+
+/**
+ * Trie une liste de Feeds par conteneur (`folderId`, `null` en premier) puis par
+ * rang fractionnaire, `id` en départage — **même ordre total déterministe** que
+ * `GET /api/feeds` (`ORDER BY folder_id, rank, id`, où SQLite range les `NULL`
+ * en tête en ASC). Pur, hors React. Garantit que l'écriture optimiste reflète
+ * exactement l'ordre que le prochain poll renverra.
+ */
+function sortFeedsByRank(list: readonly Feed[]): Feed[] {
+  return [...list].sort((a, b) => {
+    // `folderId` null (zone sans dossier) avant tout Folder, comme SQLite ASC.
+    if (a.folderId !== b.folderId) {
+      if (a.folderId === null) return -1;
+      if (b.folderId === null) return 1;
+      return a.folderId.localeCompare(b.folderId);
+    }
+    return a.rank.localeCompare(b.rank) || a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Réécrit le rang du Feed `id` dans le cache `FEEDS_LIST_KEY` et **re-trie** la
+ * liste globale (ordre canonique par conteneur puis rang). Partagé par l'écriture
+ * optimiste (`onMutate`) et le rollback (`onError`) du réordonnancement, pour que
+ * le rollback inverse exactement l'écriture (même chemin, pas de divergence).
+ */
+function setFeedRank(queryClient: QueryClient, id: string, rank: string): void {
+  queryClient.setQueryData<Feed[]>(FEEDS_LIST_KEY, (feeds) =>
+    feeds
+      ? sortFeedsByRank(
+          feeds.map((feed) => (feed.id === id ? { ...feed, rank } : feed)),
+        )
+      : feeds,
+  );
+}
+
+/**
+ * Mutation de **réordonnancement** d'un Feed au sein de son conteneur
+ * (`PATCH /api/feeds/:id {rank}`, #111). **Optimiste** (calquée sur
+ * `reorderFolderMutationOptions`, #109) : `onMutate` annule les requêtes en vol,
+ * capture le rang précédent du feed ciblé puis réécrit son rang dans le cache
+ * `FEEDS_LIST_KEY` **et re-trie** la liste globale (par conteneur puis rang) pour
+ * que la sidebar reflète le nouvel ordre sans attendre l'aller-retour. `onError`
+ * restaure **uniquement le rang du feed concerné** (pas un instantané global),
+ * afin qu'un rollback n'écrase pas un réordonnancement concurrent. `onSettled`
+ * invalide **uniquement** `FEEDS_LIST_KEY` : l'ordre n'affecte pas les non-lus,
+ * on ne touche donc pas aux compteurs (contrairement au déplacement #13).
+ * **Online-only** (ADR 0018, ADR 0020).
+ */
+export function reorderFeedMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: ({ id, rank }: ReorderFeedInput) =>
+      apiFetch<FeedUpdatedResponse>(`/feeds/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ rank }),
+      }),
+    onMutate: async ({
+      id,
+      rank,
+    }: ReorderFeedInput): Promise<{
+      rollback?: { id: string; rank: string };
+    }> => {
+      await queryClient.cancelQueries({ queryKey: FEEDS_LIST_KEY });
+      const previous = queryClient
+        .getQueryData<Feed[]>(FEEDS_LIST_KEY)
+        ?.find((feed) => feed.id === id);
+      if (!previous) return {};
+      setFeedRank(queryClient, id, rank);
+      return { rollback: { id, rank: previous.rank } };
+    },
+    onError: (
+      _error: unknown,
+      _vars: ReorderFeedInput,
+      context: { rollback?: { id: string; rank: string } } | undefined,
+    ) => {
+      const rollback = context?.rollback;
+      if (!rollback) return;
+      setFeedRank(queryClient, rollback.id, rollback.rank);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
+    },
+  };
+}
+
 /**
  * Invalide la liste des feeds + listes/compteurs d'articles. Partagé par toutes
  * les mutations qui font apparaître ou disparaître un feed et/ou ses articles :

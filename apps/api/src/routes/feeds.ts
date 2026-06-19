@@ -441,6 +441,14 @@ feedsRoutes.patch("/:id", async (c) => {
     }
   }
 
+  // Réordonnancement intra-conteneur (#111) : un `rank` explicite est écrit
+  // **verbatim** et, posé **après** la branche `folderId`, **écrase** toute
+  // réattribution auto de fin de conteneur (#110). Le client (`rankBetween` des
+  // voisins, ADR 0020) connaît la position voulue ; le serveur ne recalcule pas.
+  // Préfigure le drop inter-conteneur à position précise (#112) : `{folderId,
+  // rank}` déplace ET positionne en un seul PATCH.
+  if (parsed.data.rank !== undefined) set.rank = parsed.data.rank;
+
   const updated = await db
     .update(feeds)
     .set(set)

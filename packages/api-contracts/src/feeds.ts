@@ -5,17 +5,26 @@ export const subscribeSchema = z.object({ url: z.string().url() });
 export type SubscribeInput = z.infer<typeof subscribeSchema>;
 
 /**
- * Renommage et/ou déplacement d'un Feed (#13). `title` non vide pour renommer ;
- * `folderId` (uuid) pour assigner, `null` pour désassigner ; au moins un champ.
+ * Renommage, déplacement et/ou réordonnancement d'un Feed (#13, #111). `title`
+ * non vide pour renommer ; `folderId` (uuid) pour assigner, `null` pour
+ * désassigner ; `rank` (fractionnaire, ADR 0020) pour positionner le Feed au sein
+ * de son conteneur (#111). Au moins un champ. Un `rank` explicite est écrit
+ * verbatim et **prime** sur la réattribution auto de fin de conteneur (#110) —
+ * cf. la route PATCH.
  */
 export const updateFeedSchema = z
   .object({
     title: z.string().trim().min(1).optional(),
     folderId: z.string().min(1).nullable().optional(),
+    rank: z.string().min(1).optional(),
   })
-  .refine((d) => d.title !== undefined || d.folderId !== undefined, {
-    message: "no_field",
-  });
+  .refine(
+    (d) =>
+      d.title !== undefined || d.folderId !== undefined || d.rank !== undefined,
+    {
+      message: "no_field",
+    },
+  );
 export type UpdateFeedInput = z.infer<typeof updateFeedSchema>;
 
 /** Flux candidat de l'auto-découverte (#12). Miroir wire de `DiscoveredFeed`. */
@@ -101,6 +110,7 @@ export const feedUpdatedResponseSchema = z.object({
   id: z.string(),
   title: z.string().optional(),
   folderId: z.string().nullable().optional(),
+  rank: z.string().optional(),
 });
 export type FeedUpdatedResponse = z.infer<typeof feedUpdatedResponseSchema>;
 

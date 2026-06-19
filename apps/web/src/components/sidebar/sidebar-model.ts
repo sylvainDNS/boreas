@@ -1,5 +1,6 @@
 import type { Feed } from "../../lib/feeds";
 import type { Folder } from "../../lib/folders";
+import { computeFeedRank } from "./feed-reorder";
 
 /**
  * Modèle de vue **pur** (sans React) de la Sidebar (#48). Centralise le
@@ -59,6 +60,81 @@ export const UNFILED_DROPPABLE_ID = "sidebar:unfiled";
  */
 export function resolveDropTarget(droppableId: string): string | null {
   return droppableId === UNFILED_DROPPABLE_ID ? null : droppableId;
+}
+
+/**
+ * Vue minimale de la source d'un drag de Feed pour `resolveFeedDragEnd`,
+ * découplée des types dnd-kit (testable sans monter de DragDropProvider). Quand
+ * `isSortable` est vrai, les champs sortable (`initialGroup`/`group`/index)
+ * situent le Feed dans son conteneur d'origine et projeté ; `folderId` est le
+ * conteneur courant du Feed (porté par `FeedDragData`).
+ */
+export interface FeedDragSource {
+  id: string;
+  /** Le Feed est un sortable (vrai en pratique, #111) : permet le reorder. */
+  isSortable: boolean;
+  /** Conteneur sortable d'origine (id de Folder ou sentinelle « sans dossier »). */
+  initialGroup?: string;
+  /** Conteneur sortable projeté à la dépose (dnd-kit y reflète la cible). */
+  group?: string;
+  /** Index d'origine dans la liste triée du conteneur. */
+  initialIndex?: number;
+  /** Index projeté à la dépose dans le conteneur. */
+  index?: number;
+  /** Folder de rattachement courant du Feed (null = sans dossier). */
+  folderId: string | null;
+}
+
+/** Action décidée par `resolveFeedDragEnd` : réordonner, déplacer, ou rien. */
+export type FeedDragAction =
+  | { kind: "reorder"; id: string; rank: string }
+  | { kind: "move"; id: string; folderId: string | null }
+  | { kind: "none" };
+
+/**
+ * Décide, à la fin d'un drag de Feed, entre **réordonnancement intra-conteneur**
+ * (#111) et **déplacement inter-conteneur** (#13) — logique pure et testable,
+ * extraite de `Sidebar.handleDragEnd`.
+ *
+ * Si la source est sortable et que son conteneur n'a **pas changé**
+ * (`initialGroup === group` ; dnd-kit projette le group de la cible sur le
+ * sortable pendant le drag), c'est un **reorder** : `computeFeedRank` calcule le
+ * rang sur la liste **triée** du conteneur d'origine (résolue via
+ * `feedsInContainer`, la sentinelle « sans dossier » retraduite en `null`). Un
+ * no-op (`from === to`, voisins dégénérés) → `none`.
+ *
+ * Sinon c'est un **move** : il exige une cible (`targetFolderId` défini —
+ * `undefined` = drop hors zone → `none`). Un drop sur le conteneur courant
+ * (même `folderId`) → `none`. Aucun rang n'est calculé : le serveur réattribue en
+ * fin de conteneur cible (#110) ; le positionnement précis inter-conteneur est
+ * hors périmètre (#112).
+ */
+export function resolveFeedDragEnd(
+  source: FeedDragSource,
+  targetFolderId: string | null | undefined,
+  feedsInContainer: (folderId: string | null) => readonly Feed[],
+): FeedDragAction {
+  if (
+    source.isSortable &&
+    source.initialGroup !== undefined &&
+    source.initialGroup === source.group &&
+    source.initialIndex !== undefined &&
+    source.index !== undefined
+  ) {
+    const folderId = resolveDropTarget(source.initialGroup);
+    const rank = computeFeedRank(
+      feedsInContainer(folderId),
+      source.initialIndex,
+      source.index,
+    );
+    return rank === null
+      ? { kind: "none" }
+      : { kind: "reorder", id: source.id, rank };
+  }
+
+  if (targetFolderId === undefined) return { kind: "none" };
+  if (source.folderId === targetFolderId) return { kind: "none" };
+  return { kind: "move", id: source.id, folderId: targetFolderId };
 }
 
 /** Résultat du regroupement : feeds par dossier + feeds sans dossier. */

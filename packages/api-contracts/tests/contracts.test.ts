@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   articleFilterSchema,
   feedSchema,
+  feedUpdatedResponseSchema,
   markReadRequestSchema,
   settingsPatchSchema,
   themeSchema,
+  updateFeedSchema,
 } from "../src/index";
 
 describe("@boreas/api-contracts", () => {
@@ -34,6 +36,33 @@ describe("@boreas/api-contracts", () => {
     ).toBe(true);
     expect(markReadRequestSchema.safeParse({ scope: "feed" }).success).toBe(
       false,
+    );
+  });
+
+  it("updateFeedSchema accepte un rank seul (réordonnancement, #111)", () => {
+    expect(updateFeedSchema.safeParse({ rank: "a0" }).success).toBe(true);
+  });
+
+  it("updateFeedSchema rejette un rank vide", () => {
+    expect(updateFeedSchema.safeParse({ rank: "" }).success).toBe(false);
+  });
+
+  it("updateFeedSchema exige au moins un champ (rank compte, #111)", () => {
+    expect(updateFeedSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("updateFeedSchema accepte folderId + rank ensemble (#112)", () => {
+    expect(
+      updateFeedSchema.safeParse({ folderId: "fo1", rank: "a0" }).success,
+    ).toBe(true);
+  });
+
+  it("feedUpdatedResponseSchema écho un rank optionnel (#111)", () => {
+    expect(
+      feedUpdatedResponseSchema.safeParse({ id: "f1", rank: "a0" }).success,
+    ).toBe(true);
+    expect(feedUpdatedResponseSchema.safeParse({ id: "f1" }).success).toBe(
+      true,
     );
   });
 

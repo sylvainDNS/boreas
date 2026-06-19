@@ -68,11 +68,17 @@ export function FolderTree({
     });
   }
 
-  function renderFeed(feed: Feed) {
-    return (
+  // Fabrique le rendu d'un Feed sortable **scopé à son conteneur** (`group`,
+  // #111) : l'`index` est la position dans la liste triée du conteneur, ce qui
+  // permet à `onDragEnd` (Sidebar) de calculer le nouveau rang via
+  // `computeFeedRank`. Une factory par conteneur (Folder ou zone sans dossier).
+  function makeRenderFeed(group: string) {
+    return (feed: Feed, index: number) => (
       <FeedRow
         key={feed.id}
         feed={feed}
+        index={index}
+        group={group}
         unread={unreadByFeed.get(feed.id) ?? 0}
         onRequestDialog={onRequestDialog}
         onNavigate={onNavigate}
@@ -111,7 +117,7 @@ export function FolderTree({
             onToggle={() => toggleCollapse(folder.id)}
             onRequestDialog={onRequestDialog}
             onNavigate={onNavigate}
-            renderFeed={renderFeed}
+            renderFeed={makeRenderFeed(folder.id)}
             online={online}
           />
         ))}
@@ -137,7 +143,7 @@ export function FolderTree({
             +
           </button>
         </div>
-        {unfiledFeeds.map(renderFeed)}
+        {unfiledFeeds.map(makeRenderFeed(UNFILED_DROPPABLE_ID))}
         {feedsCount === 0 && (
           <div className="px-3 py-1">
             <p className="text-muted text-sm">Aucun flux pour l'instant.</p>
@@ -187,7 +193,7 @@ function FolderDroppable({
   onToggle: () => void;
   onRequestDialog: (dialog: SidebarDialog) => void;
   onNavigate?: () => void;
-  renderFeed: (feed: Feed) => ReactNode;
+  renderFeed: (feed: Feed, index: number) => ReactNode;
   online: boolean;
 }) {
   const matchRoute = useMatchRoute();

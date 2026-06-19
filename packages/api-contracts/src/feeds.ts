@@ -1,7 +1,17 @@
 import { z } from "zod";
 
-/** Abonnement par URL (de flux ou de site, #12). Aussi utilisé par `/discover`. */
-export const subscribeSchema = z.object({ url: z.string().url() });
+/**
+ * Abonnement par URL (de flux ou de site, #12). Aussi utilisé par `/discover`.
+ * `folderId` optionnel (#117) : non vide → le Feed est créé/réassigné dans ce
+ * Folder (avec un rang en fin de conteneur) ; `null` ou absent → comportement
+ * inchangé (sans dossier à la création, conserve le dossier au réabonnement).
+ * Forme alignée sur `updateFeedSchema.folderId`. `/discover` l'ignore (pas
+ * d'abonnement).
+ */
+export const subscribeSchema = z.object({
+  url: z.string().url(),
+  folderId: z.string().min(1).nullable().optional(),
+});
 export type SubscribeInput = z.infer<typeof subscribeSchema>;
 
 /**
@@ -63,6 +73,8 @@ export const subscribeErrorCodeSchema = z.enum([
   "already_subscribed",
   "invalid_feed",
   "fetch_failed",
+  // Folder cible inexistant (abonnement dans un dossier, #117) → 422.
+  "folder_not_found",
 ]);
 export type SubscribeErrorCode = z.infer<typeof subscribeErrorCodeSchema>;
 

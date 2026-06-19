@@ -419,6 +419,291 @@ describe("Rang lexorank des Feeds (#110, ADR 0020)", () => {
   });
 });
 
+describe("POST /api/feeds — abonnement dans un dossier (#117)", () => {
+  /** Insère un Folder (rang non pertinent ici). */
+  async function seedFolder(id: string): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO folders (id, name, rank) VALUES (?, ?, ?)",
+    )
+      .bind(id, `Dossier ${id}`, `a${id}`)
+      .run();
+  }
+
+  /** Insère un Feed avec rang explicite, éventuellement classé. */
+  async function seedFeed(
+    id: string,
+    opts: { folderId?: string | null; rank?: string } = {},
+  ): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO feeds (id, url, title, folder_id, rank, unsubscribed_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        id,
+        `https://src.example/${id}.xml`,
+        `Flux ${id}`,
+        opts.folderId ?? null,
+        opts.rank ?? `a${id}`,
+        null,
+      )
+      .run();
+  }
+
+  /** Lit (folder_id, rank) d'un Feed. */
+  async function feedContainer(
+    id: string,
+  ): Promise<{ folderId: string | null; rank: string }> {
+    const row = await env.DB.prepare(
+      "SELECT folder_id AS f, rank AS r FROM feeds WHERE id = ?",
+    )
+      .bind(id)
+      .first<{ f: string | null; r: string }>();
+    if (!row) throw new Error(`feed ${id} introuvable`);
+    return { folderId: row.f, rank: row.r };
+  }
+
+  beforeEach(async () => {
+    await env.DB.prepare("DELETE FROM articles").run();
+    await env.DB.prepare("DELETE FROM feeds").run();
+    await env.DB.prepare("DELETE FROM folders").run();
+  });
+
+  it("crée le Feed dans le Folder fourni (GET le confirme)", async () => {
+    await seedFolder("fold-1");
+    mockOutboundFetch(200, RSS(ITEM(1)));
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://src.example/inf.xml",
+          folderId: "fold-1",
+        }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    // La 201 n'écho PAS folderId (décision #117).
+    const body = (await res.json()) as {
+      feed: { id: string; folderId?: unknown };
+    };
+    expect(body.feed.folderId).toBeUndefined();
+
+    const list = (await (
+      await SELF.fetch(`${ORIGIN}/api/feeds`, authed())
+    ).json()) as { feeds: { id: string; folderId: string | null }[] };
+    const created = list.feeds.find((f) => f.id === body.feed.id);
+    expect(created?.folderId).toBe("fold-1");
+  });
+
+  it("deux Feeds dans le même Folder → rangs croissants et scopés au conteneur", async () => {
+    await seedFolder("fold-1");
+    // Un Feed hors dossier avec un rang « haut » ne doit pas borner la cible.
+    await seedFeed("loose", { folderId: null, rank: "z9" });
+
+    mockOutboundFetch(200, RSS(ITEM(1)));
+    const r1 = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://src.example/one.xml",
+          folderId: "fold-1",
+        }),
+      }),
+    );
+    const id1 = ((await r1.json()) as { feed: { id: string } }).feed.id;
+
+    mockOutboundFetch(200, RSS(ITEM(2)));
+    const r2 = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://src.example/two.xml",
+          folderId: "fold-1",
+        }),
+      }),
+    );
+    const id2 = ((await r2.json()) as { feed: { id: string } }).feed.id;
+
+    const c1 = await feedContainer(id1);
+    const c2 = await feedContainer(id2);
+    expect(c1.folderId).toBe("fold-1");
+    expect(c2.folderId).toBe("fold-1");
+    // Rangs croissants au sein du conteneur, non bornés par le « loose » (z9).
+    expect(c2.rank > c1.rank).toBe(true);
+    expect(c1.rank < "z9").toBe(true);
+  });
+
+  it("folderId inexistant → 422 folder_not_found, aucun Feed créé ni fetch", async () => {
+    const outbound = vi.fn(
+      async () => new Response(RSS(ITEM(1)), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", outbound);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://src.example/nope.xml",
+          folderId: "ghost",
+        }),
+      }),
+    );
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "folder_not_found" });
+
+    // Aucun fetch sortant, aucun Feed créé.
+    expect(outbound).not.toHaveBeenCalled();
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM feeds",
+    ).first<{ n: number }>();
+    expect(count?.n).toBe(0);
+  });
+
+  it("sans folderId : comportement inchangé (NULL, rang zone sans-dossier)", async () => {
+    await seedFolder("fold-1");
+    await seedFeed("classed", { folderId: "fold-1", rank: "z9" });
+    await seedFeed("loose", { folderId: null, rank: "a0" });
+
+    mockOutboundFetch(200, RSS(ITEM(1)));
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "https://src.example/free.xml" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const id = ((await res.json()) as { feed: { id: string } }).feed.id;
+    const c = await feedContainer(id);
+    expect(c.folderId).toBeNull();
+    // Placé en fin de la zone sans-dossier (après a0), pas après z9 du Folder.
+    expect(c.rank > "a0").toBe(true);
+    expect(c.rank < "z9").toBe(true);
+  });
+
+  it("candidat unique (#12) atterrit dans le Folder fourni", async () => {
+    const SITE = "https://site.example/blog";
+    const FEED = "https://site.example/feed.xml";
+    await seedFolder("fold-1");
+    mockFetchByUrl([
+      { match: FEED, body: RSS(ITEM(1)) },
+      { match: SITE, body: HTML(FEED_LINK(FEED)), contentType: "text/html" },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE, folderId: "fold-1" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const id = ((await res.json()) as { feed: { id: string } }).feed.id;
+    expect((await feedContainer(id)).folderId).toBe("fold-1");
+  });
+
+  it("multi-candidats (#12) → 200 inchangé (folderId ignoré, aucun Feed)", async () => {
+    const SITE = "https://site.example/blog";
+    await seedFolder("fold-1");
+    mockFetchByUrl([
+      {
+        match: SITE,
+        body: HTML(
+          FEED_LINK("https://site.example/rss.xml") +
+            FEED_LINK("https://site.example/atom.xml", "application/atom+xml"),
+        ),
+        contentType: "text/html",
+      },
+    ]);
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: SITE, folderId: "fold-1" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { candidates: unknown[] };
+    expect(body.candidates).toHaveLength(2);
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM feeds",
+    ).first<{ n: number }>();
+    expect(count?.n).toBe(0);
+  });
+
+  it("réabonnement + folderId → réactivé, réassigné et rangé en fin du conteneur cible", async () => {
+    await seedFolder("fold-1");
+    // Conteneur cible déjà peuplé : un résident rang « a5 ».
+    await seedFeed("resident", { folderId: "fold-1", rank: "a5" });
+    // Feed désabonné, hors dossier, rang « z0 ».
+    const url = "https://src.example/re.xml";
+    await env.DB.prepare(
+      "INSERT INTO feeds (id, url, title, folder_id, rank, unsubscribed_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("dead", url, "Mort", null, "z0", "2026-06-01T00:00:00Z")
+      .run();
+
+    mockOutboundFetch(200, RSS(`${ITEM(1)}${ITEM(2)}`));
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url, folderId: "fold-1" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const c = await feedContainer("dead");
+    // Réassigné au conteneur cible et rangé après le résident (a5).
+    expect(c.folderId).toBe("fold-1");
+    expect(c.rank > "a5").toBe(true);
+    expect(c.rank).not.toBe("z0");
+    // Réactivé.
+    const row = await env.DB.prepare(
+      "SELECT unsubscribed_at AS u FROM feeds WHERE id = ?",
+    )
+      .bind("dead")
+      .first<{ u: string | null }>();
+    expect(row?.u).toBeNull();
+  });
+
+  it("réabonnement sans folderId → conserve son dossier d'origine", async () => {
+    await seedFolder("fold-1");
+    const url = "https://src.example/keep.xml";
+    await env.DB.prepare(
+      "INSERT INTO feeds (id, url, title, folder_id, rank, unsubscribed_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("kept", url, "Gardé", "fold-1", "a5", "2026-06-01T00:00:00Z")
+      .run();
+
+    mockOutboundFetch(200, RSS(ITEM(1)));
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const c = await feedContainer("kept");
+    // Dossier conservé, rang inchangé (on ne re-ranke pas sans folderId).
+    expect(c.folderId).toBe("fold-1");
+    expect(c.rank).toBe("a5");
+  });
+});
+
 describe("POST /api/feeds/discover — auto-découverte", () => {
   const SITE = "https://site.example/blog";
 

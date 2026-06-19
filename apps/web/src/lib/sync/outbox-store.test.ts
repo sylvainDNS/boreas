@@ -41,6 +41,7 @@ function feed(over: Partial<SyncFeed> & { id: string }): SyncFeed {
     lastError: over.lastError ?? null,
     lastCheckAt: over.lastCheckAt ?? null,
     folderId: over.folderId ?? null,
+    rank: "a0",
     unsubscribed: over.unsubscribed ?? false,
   };
 }

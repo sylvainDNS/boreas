@@ -27,6 +27,7 @@ function makeFeed(over: Partial<Feed> = {}): Feed {
     lastError: null,
     lastCheckAt: null,
     folderId: null,
+    rank: "a0",
     ...over,
   };
 }

@@ -125,6 +125,19 @@ export const feeds = sqliteTable("feeds", {
    * santé `ok`/`error`, lui dérivé de `consecutive_failures`.
    */
   unsubscribed_at: text("unsubscribed_at"),
+  /**
+   * Rang fractionnaire (#110, ADR 0020) : clé lexicographique d'ordre manuel des
+   * Feeds, **scopée au conteneur** — un Folder donné, ou la zone « sans dossier »
+   * (`folder_id IS NULL`). Le rang n'est donc unique/ordonné qu'au sein d'un même
+   * conteneur, pas globalement. `GET /api/feeds` trie par `(folder_id, rank, id)` ;
+   * l'abonnement (POST, `folder_id` NULL) pose un rang en fin de la zone sans-dossier,
+   * et le déplacement (PATCH d'un `folderId`) réattribue un rang en fin du conteneur
+   * cible (`rankBetween(dernierRang, null)`). Backfillé par conteneur dans l'ordre
+   * `title ASC, url ASC, id ASC` avec des clés `fractional-indexing` valides
+   * (migration), pour rester intercalable. Pas de défaut côté code : tout INSERT
+   * applicatif fournit un rang explicite.
+   */
+  rank: text("rank").notNull(),
   created_at: text("created_at")
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`),

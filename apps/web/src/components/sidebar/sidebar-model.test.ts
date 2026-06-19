@@ -17,6 +17,7 @@ function makeFeed(id: string, folderId: string | null): Feed {
     lastError: null,
     lastCheckAt: null,
     folderId,
+    rank: "a0",
   };
 }
 

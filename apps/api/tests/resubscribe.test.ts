@@ -37,12 +37,13 @@ function unsubscribedFeed(id: string, folderId: string | null = null) {
     last_error_at: "2026-01-01T00:00:00Z",
     folder_id: folderId,
     unsubscribed_at: "2026-01-01T00:00:00Z",
+    rank: `a${id}`,
   };
 }
 
-/** Insère des Feeds en respectant la limite D1 de variables liées (13 colonnes). */
+/** Insère des Feeds en respectant la limite D1 de variables liées (14 colonnes). */
 async function seedFeeds(rows: ReturnType<typeof unsubscribedFeed>[]) {
-  for (const group of chunk(rows, insertChunkSize(13))) {
+  for (const group of chunk(rows, insertChunkSize(14))) {
     await db.insert(feeds).values(group);
   }
 }

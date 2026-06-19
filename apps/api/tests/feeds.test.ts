@@ -236,6 +236,137 @@ describe("POST /api/feeds — abonnement", () => {
   });
 });
 
+describe("Rang lexorank des Feeds (#110, ADR 0020)", () => {
+  /** Insère un Feed avec un rang explicite, éventuellement rattaché à un Folder. */
+  async function seedFeed(
+    id: string,
+    opts: { title?: string; folderId?: string | null; rank?: string } = {},
+  ): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO feeds (id, url, title, folder_id, rank) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        id,
+        `https://src.example/${id}.xml`,
+        opts.title ?? `Flux ${id}`,
+        opts.folderId ?? null,
+        opts.rank ?? `a${id}`,
+      )
+      .run();
+  }
+
+  /** Insère un Folder (rang non pertinent pour ces tests). */
+  async function seedFolder(id: string): Promise<void> {
+    await env.DB.prepare(
+      "INSERT INTO folders (id, name, rank) VALUES (?, ?, ?)",
+    )
+      .bind(id, `Dossier ${id}`, `a${id}`)
+      .run();
+  }
+
+  /** Lit le rang d'un Feed en base. */
+  async function feedRank(id: string): Promise<string> {
+    const row = await env.DB.prepare("SELECT rank AS r FROM feeds WHERE id = ?")
+      .bind(id)
+      .first<{ r: string }>();
+    if (!row) throw new Error(`feed ${id} introuvable`);
+    return row.r;
+  }
+
+  beforeEach(async () => {
+    await env.DB.prepare("DELETE FROM articles").run();
+    await env.DB.prepare("DELETE FROM feeds").run();
+    await env.DB.prepare("DELETE FROM folders").run();
+  });
+
+  it("GET /api/feeds trie par rang au sein d'un conteneur et expose `rank`", async () => {
+    // Zone « sans dossier » : deux feeds dont le rang ne suit PAS l'ordre alpha.
+    await seedFeed("z-feed", { title: "Zèbre", rank: "a0" });
+    await seedFeed("a-feed", { title: "Abeille", rank: "a1" });
+
+    const res = await SELF.fetch(`${ORIGIN}/api/feeds`, authed());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      feeds: { id: string; rank: string }[];
+    };
+    // Tri par rang (et non par titre) : a0 (Zèbre) avant a1 (Abeille).
+    expect(body.feeds.map((f) => f.id)).toEqual(["z-feed", "a-feed"]);
+    expect(body.feeds[0].rank).toBe("a0");
+    expect(body.feeds[1].rank).toBe("a1");
+  });
+
+  it("POST /api/feeds place le nouveau Feed en fin de la zone « sans dossier »", async () => {
+    // Un Feed déjà classé dans un Folder avec un rang « haut » ne doit PAS borner
+    // le rang du nouvel abonné (scoping par conteneur, ADR 0020).
+    await seedFolder("fold-1");
+    await seedFeed("classed", { folderId: "fold-1", rank: "z9" });
+    await seedFeed("loose", { folderId: null, rank: "a0" });
+
+    mockOutboundFetch(200, RSS(ITEM(1)));
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds`,
+      authed({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "https://src.example/new.xml" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { feed } = (await res.json()) as { feed: { id: string } };
+
+    const newRank = await feedRank(feed.id);
+    // Placé après le dernier rang de la zone sans-dossier (a0), pas après z9.
+    expect(newRank > "a0").toBe(true);
+    expect(newRank < "z9").toBe(true);
+  });
+
+  it("PATCH /api/feeds/:id déplaçant vers un Folder réattribue un rang en fin du conteneur cible", async () => {
+    await seedFolder("fold-1");
+    // Conteneur cible déjà peuplé : un Feed de rang « a5 » dans fold-1.
+    await seedFeed("resident", { folderId: "fold-1", rank: "a5" });
+    // Feed à déplacer, hors dossier, rang « z0 » (plus haut que la cible).
+    await seedFeed("mover", { folderId: null, rank: "z0" });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/mover`,
+      authed({ method: "PATCH", body: JSON.stringify({ folderId: "fold-1" }) }),
+    );
+    expect(res.status).toBe(200);
+
+    const movedRank = await feedRank("mover");
+    // Réattribué en fin du conteneur cible (après a5), pas conservé à z0.
+    expect(movedRank > "a5").toBe(true);
+    expect(movedRank).not.toBe("z0");
+  });
+
+  it("PATCH /api/feeds/:id désassignant (folderId null) réattribue en fin de la zone sans-dossier", async () => {
+    await seedFolder("fold-1");
+    await seedFeed("loose", { folderId: null, rank: "a0" });
+    await seedFeed("mover", { folderId: "fold-1", rank: "z0" });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/mover`,
+      authed({ method: "PATCH", body: JSON.stringify({ folderId: null }) }),
+    );
+    expect(res.status).toBe(200);
+
+    const movedRank = await feedRank("mover");
+    expect(movedRank > "a0").toBe(true);
+    expect(movedRank).not.toBe("z0");
+  });
+
+  it("PATCH /api/feeds/:id (renommage seul) ne touche pas le rang", async () => {
+    await seedFeed("feed-1", { title: "Avant", folderId: null, rank: "a3" });
+
+    const res = await SELF.fetch(
+      `${ORIGIN}/api/feeds/feed-1`,
+      authed({ method: "PATCH", body: JSON.stringify({ title: "Après" }) }),
+    );
+    expect(res.status).toBe(200);
+    expect(await feedRank("feed-1")).toBe("a3");
+  });
+});
+
 describe("POST /api/feeds/discover — auto-découverte", () => {
   const SITE = "https://site.example/blog";
 

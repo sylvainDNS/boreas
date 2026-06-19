@@ -5,6 +5,7 @@ import {
   KeyboardSensor,
   PointerSensor,
 } from "@dnd-kit/react";
+import { isSortable } from "@dnd-kit/react/sortable";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
@@ -14,6 +15,11 @@ import { foldersQueryOptions } from "../lib/folders";
 import { useOnlineStatus } from "../lib/use-online-status";
 import { OfflineStatus } from "./OfflineStatus";
 import { FolderTree } from "./sidebar/FolderTree";
+import {
+  computeFolderRank,
+  FOLDER_DRAG_TYPE,
+  type FolderDragData,
+} from "./sidebar/folder-reorder";
 import { SidebarDialogs } from "./sidebar/SidebarDialogs";
 import { SidebarSearch } from "./sidebar/SidebarSearch";
 import {
@@ -23,6 +29,7 @@ import {
   type SidebarDialog,
 } from "./sidebar/sidebar-model";
 import { useFeedLifecycle } from "./sidebar/use-feed-lifecycle";
+import { useFolderReorder } from "./sidebar/use-folder-reorder";
 import { CountBadge } from "./ui/Badge";
 import { BrandLogo } from "./ui/BrandLogo";
 
@@ -77,6 +84,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const online = useOnlineStatus();
 
   const lifecycle = useFeedLifecycle();
+  const folderReorder = useFolderReorder();
 
   const unreadByFeed = useMemo(
     () => new Map(counts.data?.byFeed.map((f) => [f.feedId, f.count])),
@@ -95,15 +103,32 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     [foldersData, feedsData],
   );
 
-  // Fin de drag : un Feed (source) lâché sur un dossier ou la zone « sans
-  // dossier » (target). On ignore l'annulation et les drops hors cible, et on
-  // court-circuite un drop sur le dossier courant (no-op). `move` est optimiste.
-  // **Online-only** (ADR 0018) : hors-ligne, on no-op (le drag est aussi
-  // désactivé côté `FeedRow`, ceci est une double sécurité).
+  // Fin de drag : on route selon le **type de la source** (#109). Source dossier
+  // (`FOLDER_DRAG_TYPE`) → réordonnancement entre dossiers ; sinon, chemin Feed
+  // (déplacement vers un dossier / désassignation). On ignore l'annulation et les
+  // drops hors cible. **Online-only** (ADR 0018) : hors-ligne, on no-op (le drag
+  // est aussi désactivé côté sources, double sécurité).
   function handleDragEnd(event: DragEndEvent) {
     if (!online) return;
     const { source, target } = event.operation;
-    if (event.canceled || !source || !target) return;
+    if (event.canceled || !source) return;
+
+    if (source.type === FOLDER_DRAG_TYPE && isSortable(source)) {
+      // Index avant/après dans la liste triée, fournis par dnd-kit (sortable) :
+      // `initialIndex` = position au début du drag, `index` = position projetée à
+      // la dépose. Le rang est calculé sur la liste réordonnée puis persisté.
+      const rank = computeFolderRank(
+        foldersData,
+        source.initialIndex,
+        source.index,
+      );
+      if (rank === null) return;
+      folderReorder.reorder(String(source.id), rank);
+      return;
+    }
+
+    // Chemin Feed : nécessite une cible (dossier ou zone « sans dossier »).
+    if (!target) return;
     const targetFolderId = resolveDropTarget(String(target.id));
     const data = source.data as FeedDragData | undefined;
     if (data?.folderId === targetFolderId) return;
@@ -154,14 +179,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           />
         </nav>
 
-        {/* Fantôme suivant le curseur pendant le drag : libellé du Feed. */}
+        {/* Fantôme suivant le curseur pendant le drag : libellé du Feed (déplacement)
+            ou nom du dossier (réordonnancement, #109), selon le type de la source. */}
         <DragOverlay>
           {(source) => {
-            const data = source.data as FeedDragData | undefined;
-            if (!data) return null;
+            const label =
+              source.type === FOLDER_DRAG_TYPE
+                ? (source.data as FolderDragData | undefined)?.name
+                : (source.data as FeedDragData | undefined)?.label;
+            if (label === undefined) return null;
             return (
               <div className={`${itemBase} bg-surface text-text shadow-pop`}>
-                <span className="truncate">{data.label}</span>
+                <span className="truncate">{label}</span>
               </div>
             );
           }}

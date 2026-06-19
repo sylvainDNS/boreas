@@ -1,4 +1,5 @@
 import { useDroppable } from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import type { Feed } from "../../lib/feeds";
@@ -6,6 +7,7 @@ import type { Folder } from "../../lib/folders";
 import { menuItemClass, RowMenu } from "../RowMenu";
 import { UnreadDot } from "../ui/Badge";
 import { FeedRow } from "./FeedRow";
+import { FOLDER_DRAG_TYPE, type FolderDragData } from "./folder-reorder";
 import {
   FEED_DRAG_TYPE,
   itemActive,
@@ -15,6 +17,9 @@ import {
   UNFILED_DROPPABLE_ID,
   unreadNameClass,
 } from "./sidebar-model";
+
+/** Groupe sortable des Folders (#109) : tous les dossiers en partagent l'identité. */
+const FOLDERS_SORTABLE_GROUP = "folders";
 
 /** Surbrillance d'une zone de drop survolée par un Feed en cours de drag. */
 const dropTargetClass = "rounded-card ring-2 ring-accent ring-inset";
@@ -95,10 +100,11 @@ export function FolderTree({
             +
           </button>
         </div>
-        {folders.map((folder) => (
+        {folders.map((folder, index) => (
           <FolderDroppable
             key={folder.id}
             folder={folder}
+            index={index}
             feeds={feedsByFolder.get(folder.id) ?? []}
             isExpanded={!collapsed.has(folder.id)}
             unread={unreadByFolder.get(folder.id) ?? 0}
@@ -152,13 +158,18 @@ export function FolderTree({
 }
 
 /**
- * Un dossier : en-tête (repli/dépli, lien, compteur, menu) + ses feeds dépliés,
- * le tout formant **une seule zone de drop** (`accept: feed`). Composant
- * dédié car `useDroppable` est un hook : un hook par dossier rendu, jamais dans
- * une fonction appelée en boucle. Lâcher un Feed ici le déplace dans ce dossier.
+ * Un dossier : en-tête (repli/dépli, lien, compteur, menu) + ses feeds dépliés.
+ * **Sortable** (#109) : le dossier est à la fois *source* d'un drag de
+ * réordonnancement (`type: folder`) et *cible* de drop — d'un autre dossier
+ * (réordonnancement) **comme** d'un Feed (`accept: [folder, feed]`, préserve le
+ * déplacement Feed→Dossier de #13). `index`/`group` situent le dossier dans la
+ * liste triée ; `onDragEnd` (Sidebar) lit `source.sortable.initialIndex`/`index`.
+ * Composant dédié car `useSortable` est un hook : un par dossier rendu, jamais
+ * dans une fonction appelée en boucle. **Online-only** : `disabled` hors-ligne.
  */
 function FolderDroppable({
   folder,
+  index,
   feeds,
   isExpanded,
   unread,
@@ -169,6 +180,7 @@ function FolderDroppable({
   online,
 }: {
   folder: Folder;
+  index: number;
   feeds: readonly Feed[];
   isExpanded: boolean;
   unread: number;
@@ -182,9 +194,19 @@ function FolderDroppable({
   const isActive = Boolean(
     matchRoute({ to: "/folders/$folderId", params: { folderId: folder.id } }),
   );
-  const { ref, isDropTarget } = useDroppable({
+  const { ref, isDropTarget } = useSortable<FolderDragData>({
     id: folder.id,
-    accept: FEED_DRAG_TYPE,
+    index,
+    group: FOLDERS_SORTABLE_GROUP,
+    type: FOLDER_DRAG_TYPE,
+    // Alimente le fantôme du DragOverlay sans relire le cache.
+    data: { name: folder.name },
+    // Reste cible de drop d'un Feed (déplacement Feed→Dossier, #13) en plus du
+    // réordonnancement entre dossiers.
+    accept: [FOLDER_DRAG_TYPE, FEED_DRAG_TYPE],
+    // Réordonnancement = op online-only (ADR 0018) : hors-ligne, drag/drop désactivés
+    // (et `onDragEnd` no-op en secours).
+    disabled: !online,
   });
 
   return (

@@ -19,6 +19,7 @@ import {
   UNFILED_DROPPABLE_ID,
   unreadNameClass,
 } from "./sidebar-model";
+import { useLiftMenu } from "./useLiftMenu";
 
 /** Groupe sortable des Folders (#109) : tous les dossiers en partagent l'identité. */
 const FOLDERS_SORTABLE_GROUP = "folders";
@@ -203,6 +204,13 @@ function FolderDroppable({
     matchRoute({ to: "/folders/$folderId", params: { folderId: folder.id } }),
   );
   const menu = useRowMenu();
+  // Geste long-press unifié (#120) : lift tactile → menu ; `liftActive` garde le
+  // `contextmenu` natif et porte le style soulevé.
+  const { liftActive } = useLiftMenu({
+    sourceId: folder.id,
+    openAt: menu.openAt,
+    close: menu.close,
+  });
   // Alimente le fantôme du DragOverlay sans relire le cache (#114 : ghost fidèle
   // à la ligne). Mémoïsé sur des primitives car dnd-kit compare `data` par
   // `Object.is` et réécrirait le signal à chaque render (poll, route) sinon.
@@ -228,9 +236,19 @@ function FolderDroppable({
     <div ref={ref} className={isDropTarget ? dropTargetClass : undefined}>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: clic droit / Shift+F10 sur toute la ligne ne sont qu'une commodité ; l'accès clavier passe par le bouton déclencheur focalisable (#114). */}
       <div
-        onContextMenu={menu.onContextMenu}
+        // Tactile : long-press → menu via le lift dnd-kit (#120) ; on ignore alors
+        // le `contextmenu` natif. Desktop souris : `liftActive` faux → inchangé.
+        onContextMenu={(e) => {
+          if (liftActive) {
+            e.preventDefault();
+            return;
+          }
+          menu.onContextMenu(e);
+        }}
         onKeyDown={menu.onKeyDown}
-        className={`group ${itemBase} ${isActive ? itemActive : ""}`}
+        className={`group ${itemBase} select-none [-webkit-touch-callout:none] ${
+          isActive ? itemActive : ""
+        } ${liftActive ? "scale-[1.02] bg-surface-2 shadow-pop" : ""}`}
       >
         <button
           type="button"

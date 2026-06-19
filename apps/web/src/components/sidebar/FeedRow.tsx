@@ -14,6 +14,7 @@ import {
   type SidebarDialog,
   unreadNameClass,
 } from "./sidebar-model";
+import { useLiftMenu } from "./useLiftMenu";
 
 /**
  * Ligne d'un Feed dans la Sidebar (#48). État actif dérivé de la route
@@ -48,6 +49,13 @@ export function FeedRow({
   );
   const label = feedLabel(feed);
   const menu = useRowMenu();
+  // Geste long-press unifié (#120) : sur tactile, le lift dnd-kit ouvre le menu ;
+  // `liftActive` neutralise le `contextmenu` natif tardif et porte le style soulevé.
+  const { liftActive } = useLiftMenu({
+    sourceId: feed.id,
+    openAt: menu.openAt,
+    close: menu.close,
+  });
 
   // Sortable (#111) : le Feed est à la fois *source* d'un réordonnancement
   // **intra-conteneur** (même `group`) et d'un déplacement **inter-conteneur**
@@ -78,9 +86,20 @@ export function FeedRow({
     // biome-ignore lint/a11y/noStaticElementInteractions: clic droit / Shift+F10 sur toute la ligne ne sont qu'une commodité ; l'accès clavier passe par le bouton déclencheur focalisable (#114).
     <div
       ref={ref}
-      onContextMenu={menu.onContextMenu}
+      // Sur tactile, le long-press ouvre le menu via le lift dnd-kit (#120) : on
+      // ignore alors le `contextmenu` natif (qui le rouvrirait à un autre ancrage).
+      // Desktop souris : `liftActive` toujours faux → clic droit inchangé.
+      onContextMenu={(e) => {
+        if (liftActive) {
+          e.preventDefault();
+          return;
+        }
+        menu.onContextMenu(e);
+      }}
       onKeyDown={menu.onKeyDown}
-      className={`group ${itemBase} ${isActive ? itemActive : ""} ${
+      className={`group ${itemBase} select-none [-webkit-touch-callout:none] ${
+        isActive ? itemActive : ""
+      } ${liftActive ? "scale-[1.02] bg-surface-2 shadow-pop" : ""} ${
         isDragSource ? "opacity-50" : ""
       }`}
     >

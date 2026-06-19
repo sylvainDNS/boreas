@@ -44,3 +44,33 @@ export function computeFeedRank(
   if (before !== null && after !== null && before >= after) return null;
   return rankBetween(before, after);
 }
+
+/**
+ * Calcule le rang fractionnaire (ADR 0020) d'un Feed **inséré à `index`** dans la
+ * liste **triée du conteneur cible** lors d'une dépose **inter-conteneur** (#112)
+ * — l'item déplacé n'appartient **pas encore** à `targetList` (le cache n'a pas
+ * bougé : seule la projection optimiste de dnd-kit a réordonné le DOM). C'est la
+ * différence avec `computeFeedRank` (#111), qui réordonne intra-conteneur une
+ * liste contenant déjà l'item.
+ *
+ * `index` est l'index d'insertion projeté par dnd-kit (`source.index` à la dépose
+ * cross-group) : l'item occuperait la position `index` dans `[...avant, item,
+ * ...après]`. Comme `targetList` n'inclut pas l'item, le voisin **avant** est
+ * `targetList[index - 1]` et le voisin **après** `targetList[index]`. `rankBetween`
+ * gère la tête (`index = 0` → `before = null`), la queue (`index = len` →
+ * `after = null`) et le conteneur **vide** (`before = after = null`).
+ *
+ * Renvoie `null` (dépose abandonnée, pas de crash) si les voisins encadrants ont
+ * un rang non strictement ordonné (`before >= after`) — cas dégénéré atteignable
+ * (deux Feeds d'un conteneur peuvent partager un rang, ADR 0018), où `rankBetween`
+ * lèverait. Le prochain poll réconcilie l'ordre.
+ */
+export function rankAtInsertion(
+  targetList: readonly Feed[],
+  index: number,
+): string | null {
+  const before = targetList[index - 1]?.rank ?? null;
+  const after = targetList[index]?.rank ?? null;
+  if (before !== null && after !== null && before >= after) return null;
+  return rankBetween(before, after);
+}

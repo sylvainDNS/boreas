@@ -194,16 +194,22 @@ function sortFeedsByRank(list: readonly Feed[]): Feed[] {
 }
 
 /**
- * Réécrit le rang du Feed `id` dans le cache `FEEDS_LIST_KEY` et **re-trie** la
- * liste globale (ordre canonique par conteneur puis rang). Partagé par l'écriture
- * optimiste (`onMutate`) et le rollback (`onError`) du réordonnancement, pour que
- * le rollback inverse exactement l'écriture (même chemin, pas de divergence).
+ * Applique un `patch` (rang et/ou conteneur) au Feed `id` dans le cache
+ * `FEEDS_LIST_KEY` puis **re-trie** la liste globale (ordre canonique par
+ * conteneur puis rang). Cœur partagé des écritures optimistes/rollbacks de
+ * réordonnancement (#111) et de déplacement positionné (#112) : un seul chemin
+ * map+re-tri, pour que le rollback inverse exactement l'écriture (pas de
+ * divergence) et qu'une évolution du tri/cache ne se corrige qu'à un endroit.
  */
-function setFeedRank(queryClient: QueryClient, id: string, rank: string): void {
+function patchFeedAndResort(
+  queryClient: QueryClient,
+  id: string,
+  patch: Partial<Pick<Feed, "rank" | "folderId">>,
+): void {
   queryClient.setQueryData<Feed[]>(FEEDS_LIST_KEY, (feeds) =>
     feeds
       ? sortFeedsByRank(
-          feeds.map((feed) => (feed.id === id ? { ...feed, rank } : feed)),
+          feeds.map((feed) => (feed.id === id ? { ...feed, ...patch } : feed)),
         )
       : feeds,
   );
@@ -240,7 +246,7 @@ export function reorderFeedMutationOptions(queryClient: QueryClient) {
         .getQueryData<Feed[]>(FEEDS_LIST_KEY)
         ?.find((feed) => feed.id === id);
       if (!previous) return {};
-      setFeedRank(queryClient, id, rank);
+      patchFeedAndResort(queryClient, id, { rank });
       return { rollback: { id, rank: previous.rank } };
     },
     onError: (
@@ -250,11 +256,81 @@ export function reorderFeedMutationOptions(queryClient: QueryClient) {
     ) => {
       const rollback = context?.rollback;
       if (!rollback) return;
-      setFeedRank(queryClient, rollback.id, rollback.rank);
+      patchFeedAndResort(queryClient, rollback.id, { rank: rollback.rank });
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: FEEDS_LIST_KEY });
     },
+  };
+}
+
+/**
+ * Champs d'un **déplacement inter-conteneur à position précise** (#112) : id
+ * ciblé, conteneur cible (`null` = zone sans dossier) et rang d'insertion.
+ */
+export interface MoveAndRankFeedInput {
+  id: string;
+  /** Folder cible : `null` désassigne (zone « sans dossier »). */
+  folderId: string | null;
+  /** Rang fractionnaire calculé à la position d'insertion (`rankAtInsertion`, ADR 0020). */
+  rank: string;
+}
+
+/**
+ * Mutation de **déplacement inter-conteneur ET positionnement** d'un Feed en un
+ * seul PATCH atomique (`PATCH /api/feeds/:id {folderId, rank}`, #112). Corrige la
+ * limitation laissée par #111 : un drop sortable cross-conteneur réattribuait un
+ * rang en fin de cible (#110) au lieu de respecter la position de dépose. Le rang
+ * explicite **prime** sur la réattribution auto côté serveur (cf. route PATCH).
+ *
+ * **Optimiste**, jumeau de `reorderFeedMutationOptions` mais réécrivant **folderId
+ * ET rang** : `onMutate` capture `{folderId, rank}` précédents du **seul feed
+ * concerné** (pas un instantané global, pour ne pas écraser un déplacement
+ * concurrent), réécrit les deux via `patchFeedAndResort` et re-trie la liste
+ * globale. `onError` restaure ces deux champs par le même chemin. `onSettled`
+ * passe par `invalidateAfterFeedLifecycle` — comme le move #13, il invalide
+ * **aussi** les compteurs par dossier (`ARTICLES_COUNTS_KEY`), le feed changeant
+ * de conteneur. **Online-only** (ADR 0018, ADR 0020).
+ */
+export function moveAndRankFeedMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: ({ id, folderId, rank }: MoveAndRankFeedInput) =>
+      apiFetch<FeedUpdatedResponse>(`/feeds/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ folderId, rank }),
+      }),
+    onMutate: async ({
+      id,
+      folderId,
+      rank,
+    }: MoveAndRankFeedInput): Promise<{
+      rollback?: { id: string; folderId: string | null; rank: string };
+    }> => {
+      await queryClient.cancelQueries({ queryKey: FEEDS_LIST_KEY });
+      const previous = queryClient
+        .getQueryData<Feed[]>(FEEDS_LIST_KEY)
+        ?.find((feed) => feed.id === id);
+      if (!previous) return {};
+      patchFeedAndResort(queryClient, id, { folderId, rank });
+      return {
+        rollback: { id, folderId: previous.folderId, rank: previous.rank },
+      };
+    },
+    onError: (
+      _error: unknown,
+      _vars: MoveAndRankFeedInput,
+      context:
+        | { rollback?: { id: string; folderId: string | null; rank: string } }
+        | undefined,
+    ) => {
+      const rollback = context?.rollback;
+      if (!rollback) return;
+      patchFeedAndResort(queryClient, rollback.id, {
+        folderId: rollback.folderId,
+        rank: rollback.rank,
+      });
+    },
+    onSettled: () => invalidateAfterFeedLifecycle(queryClient),
   };
 }
 

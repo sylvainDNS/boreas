@@ -1,6 +1,6 @@
 import type { Feed } from "../../lib/feeds";
 import type { Folder } from "../../lib/folders";
-import { computeFeedRank } from "./feed-reorder";
+import { computeFeedRank, rankAtInsertion } from "./feed-reorder";
 
 /**
  * Modèle de vue **pur** (sans React) de la Sidebar (#48). Centralise le
@@ -85,29 +85,43 @@ export interface FeedDragSource {
   folderId: string | null;
 }
 
-/** Action décidée par `resolveFeedDragEnd` : réordonner, déplacer, ou rien. */
+/**
+ * Action décidée par `resolveFeedDragEnd` : réordonner intra-conteneur (#111),
+ * déplacer **et positionner** inter-conteneur en un PATCH atomique (#112),
+ * déplacer sans position (repli #13), ou rien.
+ */
 export type FeedDragAction =
   | { kind: "reorder"; id: string; rank: string }
+  | { kind: "move-and-rank"; id: string; folderId: string | null; rank: string }
   | { kind: "move"; id: string; folderId: string | null }
   | { kind: "none" };
 
 /**
  * Décide, à la fin d'un drag de Feed, entre **réordonnancement intra-conteneur**
- * (#111) et **déplacement inter-conteneur** (#13) — logique pure et testable,
- * extraite de `Sidebar.handleDragEnd`.
+ * (#111), **déplacement inter-conteneur à position précise** (#112) et
+ * **déplacement de repli** (#13) — logique pure et testable, extraite de
+ * `Sidebar.handleDragEnd`. Trois branches, dans cet ordre :
  *
- * Si la source est sortable et que son conteneur n'a **pas changé**
- * (`initialGroup === group` ; dnd-kit projette le group de la cible sur le
- * sortable pendant le drag), c'est un **reorder** : `computeFeedRank` calcule le
- * rang sur la liste **triée** du conteneur d'origine (résolue via
- * `feedsInContainer`, la sentinelle « sans dossier » retraduite en `null`). Un
- * no-op (`from === to`, voisins dégénérés) → `none`.
+ * 1. **reorder** (#111) — source sortable et conteneur **inchangé**
+ *    (`initialGroup === group` ; dnd-kit projette le group de la cible sur le
+ *    sortable pendant le drag). `computeFeedRank` calcule le rang sur la liste
+ *    **triée** du conteneur d'origine (résolue via `feedsInContainer`, la
+ *    sentinelle « sans dossier » retraduite en `null`). No-op → `none`.
  *
- * Sinon c'est un **move** : il exige une cible (`targetFolderId` défini —
- * `undefined` = drop hors zone → `none`). Un drop sur le conteneur courant
- * (même `folderId`) → `none`. Aucun rang n'est calculé : le serveur réattribue en
- * fin de conteneur cible (#110) ; le positionnement précis inter-conteneur est
- * hors périmètre (#112).
+ * 2. **move-and-rank** (#112) — source sortable mais conteneur **changé**
+ *    (`group` projeté défini et différent de `initialGroup`, `index` défini). Le
+ *    conteneur cible vient de **`source.group`** (le group projeté par dnd-kit en
+ *    cross-group), **PAS** de `targetFolderId`/`target.id` : c'est la correction de
+ *    la limitation #111, qui résolvait alors la cible depuis le droppable survolé.
+ *    `rankAtInsertion` calcule le rang à la position projetée dans la liste triée
+ *    du conteneur cible (l'item n'y est pas encore : le cache n'a pas bougé).
+ *    Voisins dégénérés → `none`.
+ *
+ * 3. **move** (repli #13) — source **non sortable** (en-tête dossier, droppable),
+ *    ou sortable sans group/index projetés. Exige une cible (`targetFolderId`
+ *    défini — `undefined` = drop hors zone → `none`). Drop sur le conteneur
+ *    courant (même `folderId`) → `none`. Aucun rang : le serveur réattribue en fin
+ *    de conteneur cible (#110).
  */
 export function resolveFeedDragEnd(
   source: FeedDragSource,
@@ -130,6 +144,23 @@ export function resolveFeedDragEnd(
     return rank === null
       ? { kind: "none" }
       : { kind: "reorder", id: source.id, rank };
+  }
+
+  // Déplacement inter-conteneur à position précise (#112) : conteneur cible résolu
+  // depuis le group projeté par dnd-kit (cross-group), et non depuis le droppable
+  // survolé — correction de la limitation #111.
+  if (
+    source.isSortable &&
+    source.initialGroup !== undefined &&
+    source.initialGroup !== source.group &&
+    source.group !== undefined &&
+    source.index !== undefined
+  ) {
+    const folderId = resolveDropTarget(source.group);
+    const rank = rankAtInsertion(feedsInContainer(folderId), source.index);
+    return rank === null
+      ? { kind: "none" }
+      : { kind: "move-and-rank", id: source.id, folderId, rank };
   }
 
   if (targetFolderId === undefined) return { kind: "none" };

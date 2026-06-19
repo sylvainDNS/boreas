@@ -5,6 +5,7 @@ import {
   feedUpdatedResponseSchema,
   markReadRequestSchema,
   settingsPatchSchema,
+  subscribeSchema,
   themeSchema,
   updateFeedSchema,
 } from "../src/index";
@@ -37,6 +38,36 @@ describe("@boreas/api-contracts", () => {
     expect(markReadRequestSchema.safeParse({ scope: "feed" }).success).toBe(
       false,
     );
+  });
+
+  it("subscribeSchema accepte un folderId (abonnement dans un dossier, #117)", () => {
+    expect(
+      subscribeSchema.safeParse({
+        url: "https://e.example/rss.xml",
+        folderId: "fo1",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("subscribeSchema accepte folderId null ou absent (sans dossier, #117)", () => {
+    expect(
+      subscribeSchema.safeParse({
+        url: "https://e.example/rss.xml",
+        folderId: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      subscribeSchema.safeParse({ url: "https://e.example/rss.xml" }).success,
+    ).toBe(true);
+  });
+
+  it("subscribeSchema rejette un folderId vide (#117)", () => {
+    expect(
+      subscribeSchema.safeParse({
+        url: "https://e.example/rss.xml",
+        folderId: "",
+      }).success,
+    ).toBe(false);
   });
 
   it("updateFeedSchema accepte un rank seul (réordonnancement, #111)", () => {

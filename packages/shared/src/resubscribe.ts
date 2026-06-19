@@ -33,11 +33,12 @@ const RESUBSCRIBE_RESET = {
 
 // Taille de lot d'un `UPDATE … WHERE id IN (…)` : on réserve une variable liée
 // par colonne du reset, plus `updated_at` (#69), plus 1 pour le `folder_id`
-// éventuel et 1 de marge ; le reste de la limite D1 sert aux ids. Dérivée du
-// nombre **réel** de colonnes posées, elle s'ajuste si l'invariant grossit, au
-// lieu d'un nombre magique qui dépasserait la limite silencieusement.
+// éventuel, 1 pour le `rank` éventuel (#117) et 1 de marge ; le reste de la
+// limite D1 sert aux ids. Dérivée du nombre **réel** de colonnes posées, elle
+// s'ajuste si l'invariant grossit, au lieu d'un nombre magique qui dépasserait
+// la limite silencieusement.
 const RESET_COLUMNS = Object.keys(RESUBSCRIBE_RESET).length;
-const RESUBSCRIBE_UPDATE_CHUNK = whereInChunkSize(RESET_COLUMNS + 3);
+const RESUBSCRIBE_UPDATE_CHUNK = whereInChunkSize(RESET_COLUMNS + 4);
 
 /** Options de réabonnement. */
 export interface ResubscribeOptions {
@@ -46,6 +47,13 @@ export interface ResubscribeOptions {
    * rattachement existant est conservé (on ne désassigne pas sans raison).
    */
   folderId?: string;
+  /**
+   * Rang cible (#117) : fourni → écrit dans le même UPDATE atomique que la
+   * réassignation, pour poser le Feed réabonné en fin du conteneur cible
+   * (Option A, #110). Absent → le rang d'origine est conservé. N'a de sens
+   * qu'accompagné de `folderId` (réassignation), mais reste indépendant.
+   */
+  rank?: string;
 }
 
 /**
@@ -67,14 +75,20 @@ export async function resubscribeFeeds(
   const set: typeof RESUBSCRIBE_RESET & {
     updated_at: number;
     folder_id?: string | null;
+    rank?: string;
   } = { ...RESUBSCRIBE_RESET, updated_at: nowEpochMs() };
   if (opts.folderId !== undefined) set.folder_id = opts.folderId;
+  if (opts.rank !== undefined) set.rank = opts.rank;
   for (const group of chunk(feedIds, RESUBSCRIBE_UPDATE_CHUNK)) {
     await db.update(feeds).set(set).where(inArray(feeds.id, group));
   }
 }
 
 /** Sucre unitaire de {@link resubscribeFeeds} pour un seul Feed. */
-export async function resubscribeFeed(db: Db, feedId: string): Promise<void> {
-  await resubscribeFeeds(db, [feedId]);
+export async function resubscribeFeed(
+  db: Db,
+  feedId: string,
+  opts: ResubscribeOptions = {},
+): Promise<void> {
+  await resubscribeFeeds(db, [feedId], opts);
 }

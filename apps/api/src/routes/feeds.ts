@@ -56,11 +56,18 @@ type SubscribeOutcome =
  * le backfill à `ingestFeed`, et rollback si le flux est injoignable ou vide.
  * Extrait de l'ancien corps de `POST /feeds` (#6) pour être réutilisé par
  * l'auto-découverte (#12) sans dupliquer la logique ni le rollback.
+ *
+ * `folderId` (#117) cible le **conteneur** d'accueil : non-null → le Feed naît
+ * (ou se réabonne) dans ce Folder, avec un rang en **fin de ce conteneur** ;
+ * `null` → zone « sans dossier » à la création, et au réabonnement le dossier
+ * existant est **conservé** (pas de désassignation). L'appelant a déjà validé
+ * l'existence du Folder.
  */
 async function subscribeToFeedUrl(
   url: string,
   db: Db,
   env: Env,
+  folderId: string | null = null,
 ): Promise<SubscribeOutcome> {
   // Dédup d'abonnement. Un Feed déjà **actif** est refusé (doublon). Un Feed
   // **désabonné** (#14, ADR 0010) est **Resubscribe** plutôt que refusé : se
@@ -74,16 +81,17 @@ async function subscribeToFeedUrl(
     if (existing.unsubscribedAt === null) {
       return { ok: false, error: "already_subscribed" };
     }
-    return resubscribeAndBackfill(existing.id, url, db, env);
+    return resubscribeAndBackfill(existing.id, url, db, env, folderId);
   }
 
   // Crée le Feed puis backfill ses articles via le module d'ingestion partagé.
   const feedId = crypto.randomUUID();
-  // Rang scopé au conteneur (ADR 0020) : un abonnement naît « sans dossier »
-  // (`folder_id` NULL), on le place donc en fin de la zone sans-dossier — les
-  // Feeds classés dans un Folder ne bornent pas ce rang.
-  const rank = rankBetween(await lastFeedRankInContainer(db, null), null);
-  await db.insert(feeds).values({ id: feedId, url, rank });
+  // Rang scopé au conteneur (ADR 0020) : on place le nouvel abonné en **fin du
+  // conteneur cible** — la zone « sans dossier » (`folderId` null) par défaut,
+  // ou le Folder demandé (#117). Les Feeds des autres conteneurs ne bornent pas
+  // ce rang.
+  const rank = rankBetween(await lastFeedRankInContainer(db, folderId), null);
+  await db.insert(feeds).values({ id: feedId, url, rank, folder_id: folderId });
 
   // ingestFeed ne lève pas sur un fetch KO (il renvoie status:"error"), mais une
   // panne D1/R2 en cours d'insertion peut remonter : on la traite comme un échec
@@ -126,14 +134,30 @@ async function subscribeToFeedUrl(
  * Contrairement à l'abonnement initial, **aucun rollback** si l'ingestion
  * échoue : la ligne Feed et ses Articles Saved préexistent et doivent survivre —
  * un fetch KO laissera simplement le Feed réabonné en statut « en erreur ».
+ *
+ * `folderId` (#117) : non-null → le Feed est **réassigné** à ce Folder et rangé
+ * en **fin du conteneur cible** (Option A, #110) dans le même UPDATE atomique
+ * que la réactivation ; `null` → son dossier existant est **conservé** (pas de
+ * désassignation au réabonnement).
  */
 async function resubscribeAndBackfill(
   feedId: string,
   url: string,
   db: Db,
   env: Env,
+  folderId: string | null = null,
 ): Promise<SubscribeOutcome> {
-  await resubscribeFeed(db, feedId);
+  // Réassignation au conteneur cible uniquement si un Folder est demandé : on
+  // calcule alors le rang de fin de ce conteneur pour un UPDATE atomique
+  // folder+rang. Sans folderId, on ne touche ni le dossier ni le rang.
+  const resubscribeOpts =
+    folderId !== null
+      ? {
+          folderId,
+          rank: rankBetween(await lastFeedRankInContainer(db, folderId), null),
+        }
+      : {};
+  await resubscribeFeed(db, feedId, resubscribeOpts);
 
   let result: Awaited<ReturnType<typeof ingestFeed>> | null = null;
   try {
@@ -176,6 +200,22 @@ async function discoverFromUrl(url: string): Promise<DiscoveredFeed[] | null> {
   }
 
   return discoverFeeds(decodeHtml(bytes, charset), finalUrl);
+}
+
+/**
+ * Existence d'un Folder par id (#117) : un seul endroit pour la garde métier
+ * partagée par l'abonnement (`POST /`) et le déplacement (`PATCH /:id`), qui
+ * renvoient tous deux 422 `folder_not_found` avant d'écrire — la FK D1
+ * l'imposerait aussi, mais on préfère une erreur métier à une 500. Centraliser
+ * évite que les deux routes divergent sur « ce qu'est un Folder existant ».
+ */
+async function folderExists(db: Db, folderId: string): Promise<boolean> {
+  const [folder] = await db
+    .select({ id: folders.id })
+    .from(folders)
+    .where(eq(folders.id, folderId))
+    .limit(1);
+  return folder !== undefined;
 }
 
 /** Extrait le `charset=` d'un en-tête Content-Type, sinon `undefined`. */
@@ -254,6 +294,8 @@ const SUBSCRIBE_ERROR_STATUS = {
   already_subscribed: 409,
   invalid_feed: 422,
   fetch_failed: 502,
+  // Folder cible inexistant (abonnement dans un dossier, #117).
+  folder_not_found: 422,
 } as const satisfies Record<SubscribeErrorCode, number>;
 
 /**
@@ -280,8 +322,17 @@ feedsRoutes.post("/", async (c) => {
   const url = parsed.data.url.trim();
   const db = getDb(c.env.DB);
 
+  // Conteneur d'accueil (#117) : `null` explicite == absent == « sans dossier ».
+  const folderId = parsed.data.folderId ?? null;
+
+  // On valide l'existence du Folder cible AVANT tout abonnement/découverte : ni
+  // Feed créé ni fetch sortant si le conteneur n'existe pas.
+  if (folderId !== null && !(await folderExists(db, folderId))) {
+    return c.json({ error: "folder_not_found" }, 422);
+  }
+
   // 1. Tentative d'abonnement direct (URL de flux).
-  const direct = await subscribeToFeedUrl(url, db, c.env);
+  const direct = await subscribeToFeedUrl(url, db, c.env, folderId);
   if (direct.ok) {
     return c.json(
       {
@@ -312,7 +363,15 @@ feedsRoutes.post("/", async (c) => {
 
   // 3. Un seul candidat → abonnement direct ; plusieurs → sélection côté SPA.
   if (candidates.length === 1 && candidates[0]) {
-    const sub = await subscribeToFeedUrl(candidates[0].url, db, c.env);
+    // Le candidat unique atterrit dans le conteneur cible (#117) comme un
+    // abonnement direct. Le cas multi-candidats ne crée rien : `folderId` y est
+    // sans objet (le SPA rappellera POST avec le flux choisi + son folderId).
+    const sub = await subscribeToFeedUrl(
+      candidates[0].url,
+      db,
+      c.env,
+      folderId,
+    );
     if (sub.ok) {
       return c.json(
         {
@@ -398,15 +457,8 @@ feedsRoutes.patch("/:id", async (c) => {
   const db = getDb(c.env.DB);
 
   // Valide la cible du déplacement avant d'écrire (folderId non-null seulement).
-  if (parsed.data.folderId) {
-    const [folder] = await db
-      .select({ id: folders.id })
-      .from(folders)
-      .where(eq(folders.id, parsed.data.folderId))
-      .limit(1);
-    if (!folder) {
-      return c.json({ error: "folder_not_found" }, 422);
-    }
+  if (parsed.data.folderId && !(await folderExists(db, parsed.data.folderId))) {
+    return c.json({ error: "folder_not_found" }, 422);
   }
 
   // `parsed.data` ne porte que les champs fournis : on mappe `folderId` (API)

@@ -14,6 +14,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   already_subscribed: "Vous êtes déjà abonné à ce flux.",
   invalid_feed: "Ce flux semble illisible.",
   no_feed_found: "Aucun flux trouvé sur cette page.",
+  // Robustesse #118 : le dossier pré-scopé a été supprimé entre l'ouverture du
+  // dialogue et la soumission (`folderId` rejeté par le backend #117).
+  folder_not_found: "Ce dossier n'existe plus.",
 };
 
 function errorMessage(error: unknown): string {
@@ -32,13 +35,23 @@ function errorMessage(error: unknown): string {
  * backend abonne directement ou, si le site expose plusieurs flux, renvoie des
  * candidats qu'on présente dans un sélecteur. Choisir un candidat relance la
  * même mutation avec son URL.
+ *
+ * Pré-scopage par dossier (#118) : `folderId` (passé à la mutation) crée le flux
+ * directement dans ce dossier ; `folderName` n'est qu'à usage d'affichage (titre
+ * contextuel « Ajouter un flux dans <dossier> »). Absents = ajout sans dossier.
  */
 export function AddFeedDialog({
   open,
   onClose,
+  folderId,
+  folderName,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Dossier cible (#118) : non vide → flux créé dedans ; absent = sans dossier. */
+  folderId?: string | null;
+  /** Nom du dossier cible (#118), pour le titre contextuel uniquement. */
+  folderName?: string;
 }) {
   const queryClient = useQueryClient();
   const [url, setUrl] = useState("");
@@ -55,16 +68,19 @@ export function AddFeedDialog({
   function submit(target: string) {
     const trimmed = target.trim();
     if (!trimmed || mutation.isPending) return;
-    mutation.mutate(trimmed, {
-      onSuccess: (outcome) => {
-        if (outcome.kind === "subscribed") {
-          close();
-        } else {
-          // Plusieurs flux : on bascule sur le sélecteur.
-          setCandidates(outcome.candidates);
-        }
+    mutation.mutate(
+      { url: trimmed, folderId },
+      {
+        onSuccess: (outcome) => {
+          if (outcome.kind === "subscribed") {
+            close();
+          } else {
+            // Plusieurs flux : on bascule sur le sélecteur.
+            setCandidates(outcome.candidates);
+          }
+        },
       },
-    });
+    );
   }
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -73,7 +89,13 @@ export function AddFeedDialog({
   }
 
   return (
-    <Dialog open={open} onClose={close} title="Ajouter un flux">
+    <Dialog
+      open={open}
+      onClose={close}
+      title={
+        folderName ? `Ajouter un flux dans ${folderName}` : "Ajouter un flux"
+      }
+    >
       {candidates ? (
         <div>
           <p className="mb-3 text-muted text-sm">

@@ -56,7 +56,12 @@ export function SidebarDialogs({
 
   return (
     <>
-      <AddFeedDialog open={dialog?.kind === "addFeed"} onClose={close} />
+      <AddFeedDialog
+        open={dialog?.kind === "addFeed"}
+        onClose={close}
+        folderId={dialog?.kind === "addFeed" ? dialog.folderId : undefined}
+        folderName={dialog?.kind === "addFeed" ? dialog.folderName : undefined}
+      />
 
       {/* Création de Folder. */}
       <NameDialog

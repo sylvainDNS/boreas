@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
-import { Route as PrototypeLongpressRouteImport } from './routes/prototype.longpress'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellSearchRouteImport } from './routes/_shell.search'
 import { Route as ShellSavedRouteImport } from './routes/_shell.saved'
@@ -32,11 +31,6 @@ const ShellIndexRoute = ShellIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ShellRoute,
-} as any)
-const PrototypeLongpressRoute = PrototypeLongpressRouteImport.update({
-  id: '/prototype/longpress',
-  path: '/prototype/longpress',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
@@ -70,7 +64,6 @@ export interface FileRoutesByFullPath {
   '/saved': typeof ShellSavedRoute
   '/search': typeof ShellSearchRoute
   '/settings': typeof ShellSettingsRoute
-  '/prototype/longpress': typeof PrototypeLongpressRoute
   '/feeds/$feedId': typeof ShellFeedsFeedIdRoute
   '/folders/$folderId': typeof ShellFoldersFolderIdRoute
 }
@@ -79,7 +72,6 @@ export interface FileRoutesByTo {
   '/saved': typeof ShellSavedRoute
   '/search': typeof ShellSearchRoute
   '/settings': typeof ShellSettingsRoute
-  '/prototype/longpress': typeof PrototypeLongpressRoute
   '/': typeof ShellIndexRoute
   '/feeds/$feedId': typeof ShellFeedsFeedIdRoute
   '/folders/$folderId': typeof ShellFoldersFolderIdRoute
@@ -91,7 +83,6 @@ export interface FileRoutesById {
   '/_shell/saved': typeof ShellSavedRoute
   '/_shell/search': typeof ShellSearchRoute
   '/_shell/settings': typeof ShellSettingsRoute
-  '/prototype/longpress': typeof PrototypeLongpressRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/feeds/$feedId': typeof ShellFeedsFeedIdRoute
   '/_shell/folders/$folderId': typeof ShellFoldersFolderIdRoute
@@ -104,7 +95,6 @@ export interface FileRouteTypes {
     | '/saved'
     | '/search'
     | '/settings'
-    | '/prototype/longpress'
     | '/feeds/$feedId'
     | '/folders/$folderId'
   fileRoutesByTo: FileRoutesByTo
@@ -113,7 +103,6 @@ export interface FileRouteTypes {
     | '/saved'
     | '/search'
     | '/settings'
-    | '/prototype/longpress'
     | '/'
     | '/feeds/$feedId'
     | '/folders/$folderId'
@@ -124,7 +113,6 @@ export interface FileRouteTypes {
     | '/_shell/saved'
     | '/_shell/search'
     | '/_shell/settings'
-    | '/prototype/longpress'
     | '/_shell/'
     | '/_shell/feeds/$feedId'
     | '/_shell/folders/$folderId'
@@ -133,7 +121,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   ShellRoute: typeof ShellRouteWithChildren
   LoginRoute: typeof LoginRoute
-  PrototypeLongpressRoute: typeof PrototypeLongpressRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -158,13 +145,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof ShellIndexRouteImport
       parentRoute: typeof ShellRoute
-    }
-    '/prototype/longpress': {
-      id: '/prototype/longpress'
-      path: '/prototype/longpress'
-      fullPath: '/prototype/longpress'
-      preLoaderRoute: typeof PrototypeLongpressRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/_shell/settings': {
       id: '/_shell/settings'
@@ -227,7 +207,6 @@ const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   ShellRoute: ShellRouteWithChildren,
   LoginRoute: LoginRoute,
-  PrototypeLongpressRoute: PrototypeLongpressRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

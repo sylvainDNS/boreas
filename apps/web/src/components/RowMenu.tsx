@@ -7,10 +7,13 @@ export const menuItemClass =
   "flex w-full items-center gap-2 rounded-card px-3 py-2 text-left text-sm text-text transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
 /** Classe du bouton déclencheur « ⋯ » d'une ligne (#114). Invisible au repos,
- *  révélé au focus clavier (ligne via `group-focus-within`, ou bouton via
- *  `focus-visible`). Partagée entre `FeedRow` et `FolderTree`. */
+ *  révélé au focus **clavier** uniquement (ligne via `group-has-[:focus-visible]`,
+ *  ou bouton via `focus-visible`). On n'utilise pas `group-focus-within`, qui
+ *  réagit aussi au focus **souris** du `Link` : cliquer un flux pour le lire
+ *  rouvrirait sinon le « ⋯ » sur la ligne active, alors que le kebab visible est
+ *  retiré (décision figée #114). Partagée entre `FeedRow` et `FolderTree`. */
 export const rowMenuTriggerClass =
-  "grid size-7 shrink-0 place-items-center rounded-card text-muted leading-none opacity-0 transition-opacity hover:bg-surface-2 hover:text-text focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 group-focus-within:opacity-100";
+  "grid size-7 shrink-0 place-items-center rounded-card text-muted leading-none opacity-0 transition-opacity hover:bg-surface-2 hover:text-text focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 group-has-[:focus-visible]:opacity-100";
 
 /** Marge minimale entre le popover et le bord du viewport (clamp anti-débordement). */
 const VIEWPORT_MARGIN = 8;

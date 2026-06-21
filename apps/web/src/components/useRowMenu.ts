@@ -45,6 +45,15 @@ export function useRowMenu() {
     setPosition({ x: r.left, y: r.bottom });
   }, []);
 
+  /**
+   * Ouverture **programmatique** aux coordonnées viewport fournies (#120, lift
+   * tactile : ancré sous le doigt). Même mécanique que `onContextMenu` sans
+   * l'événement souris ; le clamp anti-débordement est porté par `RowMenu`.
+   */
+  const openAt = useCallback((x: number, y: number) => {
+    setPosition({ x, y });
+  }, []);
+
   const onContextMenu = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
     setPosition({ x: e.clientX, y: e.clientY });
@@ -73,5 +82,13 @@ export function useRowMenu() {
     },
   };
 
-  return { isOpen, position, close, onContextMenu, onKeyDown, triggerProps };
+  return {
+    isOpen,
+    position,
+    close,
+    openAt,
+    onContextMenu,
+    onKeyDown,
+    triggerProps,
+  };
 }

@@ -46,6 +46,14 @@ export const addIconButtonClass =
 export const FEED_DRAG_TYPE = "feed";
 
 /**
+ * Seuil (px) de déplacement post-lift au-delà duquel le geste long-press unifié
+ * **bascule du menu vers le drag** (#120, ADR 0019). Indépendant du seuil
+ * d'activation du `PointerSensor` (qui distingue tap/lift) : ici on mesure le
+ * mouvement du doigt **après** le lift pour décider menu (immobile) vs drag.
+ */
+export const MOVE_AFTER_LIFT_THRESHOLD = 8;
+
+/**
  * Données portées par un Feed draggable. `folderId` permet à `onDragEnd` de
  * court-circuiter un drop sur le dossier courant (no-op) ; `label` alimente le
  * fantôme du `DragOverlay` sans relecture du cache.

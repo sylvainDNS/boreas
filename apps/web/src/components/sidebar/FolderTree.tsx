@@ -271,10 +271,24 @@ function FolderDroppable({
           </span>
         </Link>
         <UnreadDot hasUnread={unread > 0} />
+        {/* Plus de kebab permanent (#114) : déclencheur révélé au focus clavier,
+            invisible au repos. Clic droit / Shift+F10 / touche Menu ouvrent le
+            même menu via `useRowMenu`. Placé **avant** le « + » : son créneau
+            réservé (`size-7`) reste à l'intérieur, ce qui laisse le « + » collé au
+            bord droit et aligné avec le « + » de l'en-tête de section. */}
+        <button
+          type="button"
+          {...menu.triggerProps}
+          aria-label={`Actions pour ${folder.name}`}
+          title={`Actions pour ${folder.name}`}
+          className={rowMenuTriggerClass}
+        >
+          ⋯
+        </button>
         {/* « + » par dossier (#118) : ouvre l'ajout de flux pré-scopé à ce
             dossier. Visible en permanence (pas de group-hover), discret
-            (`text-muted`). Online-only (ADR 0018).
-            Classe reprise du « + » sans-dossier pour la cohérence. */}
+            (`text-muted`). Online-only (ADR 0018). Dernier élément de la ligne →
+            collé à droite, aligné avec le « + » des en-têtes de section. */}
         <button
           type="button"
           onClick={() =>
@@ -292,18 +306,6 @@ function FolderDroppable({
           className={addIconButtonClass}
         >
           +
-        </button>
-        {/* Plus de kebab permanent (#114) : déclencheur révélé au focus clavier,
-            invisible au repos. Clic droit / Shift+F10 / touche Menu ouvrent le
-            même menu via `useRowMenu`. */}
-        <button
-          type="button"
-          {...menu.triggerProps}
-          aria-label={`Actions pour ${folder.name}`}
-          title={`Actions pour ${folder.name}`}
-          className={rowMenuTriggerClass}
-        >
-          ⋯
         </button>
         {menu.position && (
           <RowMenu
